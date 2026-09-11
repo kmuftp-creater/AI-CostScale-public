@@ -34,7 +34,7 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     // 靜態資源（Logo、圖示）與 API 一律不經過登入守衛，
-    // 否則未登入時登入頁自己的 Logo 也會被導去 /login（2026-08-19 踩到）
-    "/((?!api|_next/static|_next/image|favicon.ico|logo.png|icon.png|apple-icon.png).*)",
+    // 否則未登入時登入頁自己的 Logo 也會被導去 /login。登入頁用到的圖都要列在這裡。
+    "/((?!api|_next/static|_next/image|favicon.ico|logo.png|icon.png|apple-icon.png|login-illustration.png).*)",
   ],
 };
