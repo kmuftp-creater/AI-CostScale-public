@@ -1746,6 +1746,14 @@ footer .sep {
   width: 44px;
   height: 44px;
 }
+/* 登入頁的大圖：小機器人挖 token 硬幣的插畫 */
+.login-card .login-art {
+  display: block;
+  margin: 0 auto var(--space-md);
+  width: 160px;
+  height: 160px;
+  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.45));
+}
 .login-title {
   font-family: var(--font-display);
   font-weight: 700;

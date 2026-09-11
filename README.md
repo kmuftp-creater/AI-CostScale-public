@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.png" alt="AI CostScale：自架的 AI 閘道與儀表板"></p>
+
 # AI CostScale
 
 **自架的 AI 用量與成本管理中心。** 把散在各個專案裡的 AI 金鑰收進一台閘道，每個專案只拿閘道發的「虛擬金鑰」。從此每個專案燒了多少 token、花了多少錢，都看得到，也管得住。

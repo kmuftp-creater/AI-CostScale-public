@@ -17,11 +17,11 @@ export default async function LoginPage({
     <div className="login-page">
       <div className="login-card">
         <Image
-          className="brandmark"
-          src="/logo.png"
-          alt="AI CostScale"
-          width={44}
-          height={44}
+          className="login-art"
+          src="/login-illustration.png"
+          alt="AI CostScale：小機器人在挖 token 硬幣"
+          width={160}
+          height={160}
           priority
         />
         <div className="login-title">AI CostScale</div>
