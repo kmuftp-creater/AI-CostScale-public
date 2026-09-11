@@ -18,8 +18,8 @@
   幾分鐘跑一輪。預設 30。收集器只讀「有變動」的檔，所以這個值不影響成本。
 
 .PARAMETER Token
-  回報用的 token。**主力機不必給**——那台的 `OTEL_EXPORTER_OTLP_HEADERS`
-  裡就有（Claude Code 遙測設定留下的），收集器會自己撈。
+  回報用的 token。**設過 Claude Code 遙測的電腦不必給**——那台的 `OTEL_EXPORTER_OTLP_HEADERS`
+  裡就有，收集器會自己撈。
   其他機器沒設過遙測就沒有那個變數，要用這個參數帶進來，
   或把 token 放在與本腳本同一個資料夾的 `_token.txt`（交付包就是這樣做的）。
   給了會寫進**使用者範圍**的環境變數 `COSTSCALE_INGEST_TOKEN`，只寫一次。
@@ -77,7 +77,7 @@ if (-not (Test-Path $ScriptPath)) {
 # ── token：三個來源，由近而遠 ────────────────────────────────────────
 # 1. -Token 參數
 # 2. 與本腳本同資料夾的 _token.txt（交付包用這個，使用者不必打字）
-# 3. 機器上既有的環境變數（主力機的 OTEL_EXPORTER_OTLP_HEADERS 裡就有）
+# 3. 機器上既有的環境變數（設過 Claude Code 遙測的電腦，OTEL_EXPORTER_OTLP_HEADERS 裡就有）
 # 都沒有才問。問的時候要講清楚去哪裡拿，不要只丟一個提示字元。
 function Get-ExistingToken {
   foreach ($n in @('COSTSCALE_INGEST_TOKEN')) {

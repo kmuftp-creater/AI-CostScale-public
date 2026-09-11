@@ -55,7 +55,7 @@ docker compose version
 **一定要放在 `/opt/costscale`。** 排程腳本、nginx 範例與橋接的告警都寫死這個路徑。
 
 ```bash
-sudo git clone https://github.com/<你的帳號>/<repo 名稱>.git /opt/costscale
+sudo git clone https://github.com/kmuftp-creater/AI-CostScale-public.git /opt/costscale
 ```
 
 ```bash
@@ -427,27 +427,23 @@ cd /opt/costscale && docker compose -f docker-compose.yml -f docker-compose.vps.
 
 ## 10. 訂閱用量收集器（選用）
 
-把你電腦上 Claude Code 與 Codex **自己用掉**的 token 回報到儀表板，「總覽」頁的「訂閱省下多少」才算得出來。每台有在用 CLI 的電腦各裝一次。
+先分清楚兩種用量：
 
-回報網址（換成你的儀表板網域）：
+| 用量 | 怎麼被記錄 |
+|---|---|
+| 專案透過閘道打的 API（虛擬金鑰） | **閘道自己記帳**，裝好第 1～8 節就有，不需要這一節 |
+| 你自己在電腦上用 Claude Code、Codex（訂閱） | 不經過閘道，要在那台電腦裝**用量收集器**才收得到 |
 
-```powershell
-[Environment]::SetEnvironmentVariable('COSTSCALE_CLI_USAGE_URL', 'https://cost.example.com/api/cli-usage', 'User')
-```
+收集器把 token 數字回報到儀表板，「總覽」頁的「訂閱省下多少」才算得出來。不會送出任何對話內容。每台有在用 CLI 的電腦各裝一次，裝幾台都可以。
 
-關掉 PowerShell 重開，安裝 Claude Code 收集器，`-Token` 填主機 `.env` 裡的 `OTEL_INGEST_TOKEN`：
+1. 把整個 **`collector`** 資料夾複製到那台 Windows 電腦（放桌面就可以）。
+2. 雙擊 **`1-安裝.bat`**。
+3. 照畫面貼上兩個值：儀表板網址（`.env` 的 `AUTH_URL`）與回報 token（`.env` 的 `OTEL_INGEST_TOKEN`）。
+   它會先試著回報一次，網址或 token 不對會直接告訴你，不會裝一個送不出去的東西。
+4. 它會自動偵測這台用過 Claude Code 還是 Codex，只裝收得到的。按 Enter 關閉視窗就完成了。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-claude-usage-task.ps1 -Token 貼上OTEL_INGEST_TOKEN
-```
-
-有用 Codex 的話再裝這個（它會沿用上一步存好的 token）：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-codex-usage-task.ps1
-```
-
-兩支都會先試跑一次，成功才安裝。之後每 30 分鐘在背景回報一次，沒有視窗。要移除就在同一支指令後面加 `-Uninstall`。
+之後每 30 分鐘在背景回報一次，沒有視窗、不需要系統管理員。要裝很多台、不想每台都貼一次，
+或想知道怎麼確認它在跑、怎麼移除，見 `collector/README.md`。
 
 ---
 

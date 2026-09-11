@@ -66,7 +66,8 @@ litellm-config.yaml       閘道的模型與供應商設定
 .env.example              所有設定項目與說明
 dashboard/                儀表板（Next.js）
 db/init/                  資料表，第一次啟動時自動建立
-scripts/                  排程腳本、發金鑰、用量收集器
+scripts/                  主機上的排程腳本、發金鑰
+collector/                訂閱用量收集器：複製到任何一台 Windows 電腦，雙擊安裝
 deploy/                   nginx 設定片段與主機設定腳本
 bridge/                   訂閱橋接（Windows）
 helper/                   專案看板的本機小幫手（Windows）

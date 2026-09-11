@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Continue'
 $BridgeDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # 紀錄檔位置不要只靠 $env:LOCALAPPDATA（E-26）。非互動情境下那個變數可能是空的，
 # Join-Path 會產生相對路徑，檔案落到 C:\Windows\system32 然後因為沒有寫入權限
-# 而整支無聲死掉。這裡照 scripts\push-codex-usage.ps1 的同一套逐級退回。
+# 而整支無聲死掉。這裡照 collector\push-codex-usage.ps1 的同一套逐級退回。
 $LocalApp = [Environment]::GetFolderPath('LocalApplicationData')
 if (-not $LocalApp) { $LocalApp = $env:LOCALAPPDATA }
 if (-not $LocalApp -and $env:USERPROFILE) { $LocalApp = Join-Path $env:USERPROFILE 'AppData\Local' }

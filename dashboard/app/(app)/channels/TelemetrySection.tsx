@@ -211,8 +211,8 @@ export default async function TelemetrySection({
           {!codex ? (
             <div className="empty-state">
               <span className="microlabel">Empty</span>
-              這台以外的電腦要納入統計，得在那台跑一次
-              <code>scripts/install-codex-usage-task.ps1</code>（不需管理員權限）。
+              要納入統計的電腦，把 repo 的 <code>collector</code> 資料夾複製過去、雙擊
+              <code>1-安裝.bat</code>（不需管理員權限）。
               Codex 的 token 拿不到 OTLP，只能讀它自己的 session 檔，原因見下一段。
             </div>
           ) : (
@@ -325,7 +325,7 @@ setx OTEL_EXPORTER_OTLP_HEADERS "Authorization=Bearer <遙測 token>"`}</pre>
             <code> rate_limits.primary.used_percent</code>（＝上面那個「Codex 週額度」）
             一起送到 <code>/api/cli-usage</code>。
             家用主機上每 30 分鐘跑一次
-            <code> scripts/push-codex-usage.ps1</code>——用的是「登入時啟動的常駐迴圈」
+            <code> collector/push-codex-usage.ps1</code>——用的是「登入時啟動的常駐迴圈」
             而不是工作排程器：這台機器的帳號沒有密碼，本機原則
             <code> LimitBlankPasswordUse=1</code> 會擋掉所有非互動登入，
             排程工作會回報成功卻根本不執行（2026-08-23 實測）。
