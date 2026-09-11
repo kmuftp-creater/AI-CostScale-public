@@ -1,0 +1,244 @@
+/* 營運大屏（2026-09-12）。
+   全部 class 加 bs- 前綴，與儀表板的樣式完全隔開，不會互相覆寫。
+   刻意只做深色一個世界；不跟儀表板的亮暗主題翻轉。 */
+@property --bs-ang { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+
+.bs {
+  --bs-bg: #020a26;
+  --bs-bg-2: #04143f;
+  --bs-panel: rgba(5, 28, 84, 0.40);
+  --bs-frame: rgba(38, 110, 214, 0.50);
+  --bs-cy: #22d3ee;
+  --bs-ink: #e2f1ff;
+  --bs-ink-2: #a3c0ea;
+  --bs-muted: #6484b8;
+  --bs-good: #2ee6a6;
+  --bs-warn: #ffb72b;
+  --bs-crit: #ff4d5e;
+  --bs-num: var(--font-orbitron), "Noto Sans TC", monospace;
+  --bs-body: var(--font-noto-sans-tc), "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  min-height: 100vh;
+  background: var(--bs-bg);
+  color: var(--bs-ink);
+  font-family: var(--bs-body);
+  color-scheme: dark;
+}
+.bs *, .bs *::before, .bs *::after { box-sizing: border-box; }
+
+.bs-viewport { position: relative; width: 100%; overflow: hidden; background: var(--bs-bg); }
+.bs-stage {
+  position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden;
+  background:
+    radial-gradient(circle, rgba(255,255,255,0.75) 0 1px, transparent 1.6px) 13px 29px / 173px 151px,
+    radial-gradient(circle, rgba(160,220,255,0.55) 0 1px, transparent 1.6px) 91px 7px / 239px 211px,
+    radial-gradient(circle, rgba(255,255,255,0.4) 0 0.8px, transparent 1.3px) 47px 113px / 97px 89px,
+    /* 藍紫星雲（2026-09-12：User 要科幻感，大屏改回藍紫） */
+    radial-gradient(ellipse 42% 40% at 50% 52%, rgba(124, 92, 255, 0.30), transparent 70%),
+    radial-gradient(ellipse 30% 30% at 14% 78%, rgba(108, 80, 230, 0.22), transparent 70%),
+    radial-gradient(ellipse 34% 30% at 18% 26%, rgba(23, 158, 183, 0.30), transparent 70%),
+    radial-gradient(ellipse 30% 28% at 84% 72%, rgba(225, 80, 147, 0.20), transparent 70%),
+    radial-gradient(ellipse 26% 24% at 80% 20%, rgba(222, 101, 6, 0.14), transparent 70%),
+    radial-gradient(ellipse 55% 50% at 50% 55%, rgba(40, 90, 220, 0.42), transparent 70%),
+    linear-gradient(rgba(47, 123, 255, 0.06) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(90deg, rgba(47, 123, 255, 0.06) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(180deg, var(--bs-bg-2), var(--bs-bg) 60%);
+}
+/* 全畫面掃描光：每 12 秒從上往下掃一次 */
+.bs-stage::after {
+  content: ""; position: absolute; left: 0; right: 0; top: -160px; height: 150px; z-index: 30; pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(34, 211, 238, 0.07) 60%, rgba(160, 245, 255, 0.22) 97%, transparent);
+  mix-blend-mode: screen;
+  animation: bs-scan 12s linear infinite;
+}
+@keyframes bs-scan { 0% { top: -160px; } 28% { top: 1080px; } 100% { top: 1080px; } }
+
+/* ── 標題列 ── */
+.bs-head { position: absolute; left: 0; top: 0; width: 1920px; height: 92px; }
+.bs-head svg { position: absolute; inset: 0; }
+.bs-head h1 {
+  position: absolute; left: 0; right: 0; top: 10px; margin: 0; text-align: center;
+  font: 700 36px/1.2 var(--bs-body); letter-spacing: 0.16em;
+  background: linear-gradient(180deg, #ffffff 12%, #9fe9ff 50%, #a48bff 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 12px rgba(140, 110, 255, 0.55));
+}
+.bs-sub-l, .bs-sub-r {
+  position: absolute; top: 18px; font: 500 16px var(--bs-body); color: var(--bs-ink-2); letter-spacing: 0.06em;
+  display: flex; gap: 18px; align-items: center;
+}
+.bs-sub-l { left: 36px; }
+.bs-sub-r { right: 36px; }
+.bs-clock { font: 700 22px var(--bs-num); color: var(--bs-cy); letter-spacing: 0.08em; text-shadow: 0 0 10px rgba(34, 211, 238, 0.6); }
+.bs-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: currentColor; box-shadow: 0 0 8px currentColor; }
+.bs-ok { color: var(--bs-good); }
+.bs-bad { color: var(--bs-crit); }
+.bs-tools-l { position: absolute; left: 36px; top: 54px; font: 12px var(--bs-body); color: var(--bs-muted); letter-spacing: 0.04em; }
+.bs-tools-r { position: absolute; right: 36px; top: 50px; display: flex; gap: 8px; align-items: center; }
+.bs-seg { display: inline-flex; align-items: center; border: 1px solid rgba(38, 110, 214, 0.7); background: rgba(5, 28, 84, 0.6); }
+.bs-seg-lab { font: 12px var(--bs-body); color: var(--bs-muted); padding: 0 8px; }
+.bs-seg button, .bs-btn {
+  font: 500 12px var(--bs-body); color: var(--bs-ink-2); background: transparent; border: 0; padding: 4px 10px; cursor: pointer; text-decoration: none;
+}
+.bs-seg button + button { border-left: 1px solid rgba(38, 110, 214, 0.5); }
+.bs-seg button[aria-pressed="true"] { background: rgba(34, 211, 238, 0.18); color: var(--bs-cy); }
+.bs-btn { border: 1px solid rgba(38, 110, 214, 0.7); background: rgba(5, 28, 84, 0.6); }
+.bs-btn:hover, .bs-seg button:hover { color: #ffffff; }
+.bs-seg button:focus-visible, .bs-btn:focus-visible { outline: 2px solid var(--bs-cy); outline-offset: 2px; }
+.bs-flow { stroke-dasharray: 80 900; animation: bs-sweep 5s linear infinite; }
+@keyframes bs-sweep { from { stroke-dashoffset: 980; } to { stroke-dashoffset: 0; } }
+
+/* ── 三欄 ── */
+.bs-col { position: absolute; top: 100px; display: grid; gap: 14px; }
+.bs-left { left: 20px; width: 480px; grid-template-rows: 330px 318px 290px; }
+.bs-mid { left: 516px; width: 888px; grid-template-rows: 150px 520px 268px; }
+.bs-right { left: 1420px; width: 480px; grid-template-rows: 330px 318px 290px; }
+
+/* 面板：四角角標、標題列點綴色由 --acc 決定 */
+.bs-box {
+  --acc: var(--bs-cy);
+  position: relative; display: grid; grid-template-rows: 40px 1fr; min-height: 0;
+  border: 1px solid var(--bs-frame);
+  background:
+    linear-gradient(var(--acc), var(--acc)) left top / 18px 2px no-repeat,
+    linear-gradient(var(--acc), var(--acc)) left top / 2px 18px no-repeat,
+    linear-gradient(var(--acc), var(--acc)) right top / 18px 2px no-repeat,
+    linear-gradient(var(--acc), var(--acc)) right top / 2px 18px no-repeat,
+    linear-gradient(var(--acc), var(--acc)) left bottom / 18px 2px no-repeat,
+    linear-gradient(var(--acc), var(--acc)) left bottom / 2px 18px no-repeat,
+    linear-gradient(var(--acc), var(--acc)) right bottom / 18px 2px no-repeat,
+    linear-gradient(var(--acc), var(--acc)) right bottom / 2px 18px no-repeat,
+    var(--bs-panel);
+  box-shadow: inset 0 0 40px rgba(0, 110, 255, 0.16);
+}
+/* 底部留一條窄帶給來源標記與刻度——2026-09-12 User 截圖：原本疊在圖表上，壓到 X 軸的日期 */
+.bs-box.bs-has-foot { grid-template-rows: 40px 1fr 18px; }
+.bs-foot { position: relative; z-index: 4; display: flex; justify-content: space-between; align-items: center; padding: 0 12px 0 26px; pointer-events: none; }
+.bs-hud { font: 600 9.5px var(--bs-num); letter-spacing: 0.16em; text-transform: uppercase; color: color-mix(in srgb, var(--acc) 55%, #6484b8); }
+.bs-ticks { width: 96px; height: 5px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--acc) 75%, transparent) 0 1px, transparent 1px 6px); opacity: 0.7; }
+
+/* 邊框流光 */
+.bs-box::after {
+  content: ""; position: absolute; inset: -1px; padding: 1.5px; pointer-events: none; z-index: 3;
+  background: conic-gradient(from var(--bs-ang), transparent 0 80%, color-mix(in srgb, var(--acc) 70%, #ffffff) 90%, transparent 97%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: bs-orbit var(--dur, 8s) linear infinite; animation-delay: var(--delay, 0s);
+}
+@keyframes bs-orbit { to { --bs-ang: 360deg; } }
+
+.bs-bt {
+  display: flex; align-items: center; gap: 10px; padding: 0 16px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 34%, transparent), transparent 72%);
+  border-bottom: 1px solid color-mix(in srgb, var(--acc) 40%, transparent);
+}
+.bs-bt i { width: 10px; height: 10px; transform: rotate(45deg); background: var(--acc); box-shadow: 0 0 10px var(--acc); flex: none; }
+.bs-bt span { font: 700 17px var(--bs-body); letter-spacing: 0.08em; color: #ffffff; }
+.bs-bt em { margin-left: auto; font: 400 12.5px var(--bs-body); font-style: normal; color: var(--bs-muted); letter-spacing: 0.04em; }
+.bs-bc { position: relative; min-height: 0; }
+.bs-chart { position: absolute; inset: 0; z-index: 1; }
+
+/* 翻牌數字 */
+.bs-counters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.bs-counter { display: grid; grid-template-rows: auto; align-content: center; justify-items: center; gap: 8px; padding: 10px; }
+.bs-lab { font: 500 15px var(--bs-body); color: var(--bs-ink-2); letter-spacing: 0.1em; }
+.bs-digits { display: flex; gap: 3px; align-items: flex-end; }
+.bs-digits b {
+  display: inline-grid; place-items: center; width: 26px; height: 44px;
+  font: 700 27px var(--bs-num); color: #ffffff;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 42%, #061a47), #061a47 78%);
+  border: 1px solid color-mix(in srgb, var(--acc) 70%, transparent);
+  box-shadow: inset 0 -12px 16px rgba(0, 0, 0, 0.35), 0 0 12px color-mix(in srgb, var(--acc) 45%, transparent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--acc) 80%, transparent);
+}
+.bs-digits s { text-decoration: none; font: 700 26px var(--bs-num); color: var(--acc); width: 10px; text-align: center; }
+.bs-digits u { text-decoration: none; font: 500 15px var(--bs-body); color: var(--bs-ink-2); margin: 0 6px; align-self: center; }
+.bs-alt { font: 500 13px var(--bs-body); color: var(--bs-muted); }
+.bs-alt b { color: var(--acc); font-weight: 700; }
+
+/* 拓撲：透視網格地板＋傾斜的全息投影台 */
+.bs-topo .bs-bc { overflow: hidden; }
+.bs-floor {
+  position: absolute; left: -20%; right: -20%; bottom: -8%; height: 64%; z-index: 0; pointer-events: none;
+  transform-origin: 50% 100%; transform: perspective(520px) rotateX(64deg);
+  background:
+    linear-gradient(rgba(154, 133, 255, 0.48) 1px, transparent 1px) 0 0 / 100% 38px,
+    linear-gradient(90deg, rgba(34, 211, 238, 0.28) 1px, transparent 1px) 0 0 / 46px 100%;
+  -webkit-mask-image: linear-gradient(to top, #000 8%, transparent 88%);
+  mask-image: linear-gradient(to top, #000 8%, transparent 88%);
+  opacity: 0.55;
+  animation: bs-floor 2.6s linear infinite;
+}
+@keyframes bs-floor { to { background-position: 0 38px, 0 0; } }
+.bs-holo { position: absolute; left: 50%; top: calc(50% + 46px); width: 0; height: 0; z-index: 0; pointer-events: none; perspective: 700px; }
+.bs-holo span { position: absolute; left: 0; top: 0; border-radius: 50%; transform: translate(-50%, -50%) rotateX(66deg); }
+.bs-holo .d1 {
+  width: 320px; height: 320px;
+  background: repeating-conic-gradient(rgba(154, 133, 255, 0.85) 0 1.2deg, transparent 1.2deg 10deg);
+  -webkit-mask: radial-gradient(circle, transparent 60%, #000 61% 66%, transparent 67%);
+  mask: radial-gradient(circle, transparent 60%, #000 61% 66%, transparent 67%);
+  animation: bs-spin 30s linear infinite;
+}
+.bs-holo .d2 {
+  width: 250px; height: 250px; border: 2px solid transparent;
+  border-top-color: #22d3ee; border-right-color: #9a85ff; border-bottom-color: rgba(196, 120, 255, 0.9);
+  box-shadow: 0 0 22px rgba(140, 110, 255, 0.45);
+  animation: bs-spin 9s linear infinite reverse;
+}
+.bs-holo .d3 { width: 190px; height: 190px; background: radial-gradient(circle, rgba(154, 133, 255, 0.5), rgba(60, 90, 255, 0.1) 60%, transparent 70%); }
+@keyframes bs-spin {
+  from { transform: translate(-50%, -50%) rotateX(66deg) rotateZ(0); }
+  to { transform: translate(-50%, -50%) rotateX(66deg) rotateZ(360deg); }
+}
+.bs-beam {
+  position: absolute; left: 50%; top: calc(50% - 6px); width: 96px; height: 52px; z-index: 0; pointer-events: none;
+  transform: translateX(-50%);
+  background: linear-gradient(to top, rgba(154, 133, 255, 0.5), rgba(154, 133, 255, 0));
+  clip-path: polygon(22% 0, 78% 0, 100% 100%, 0 100%);
+}
+.bs-core { position: absolute; left: 50%; top: 50%; width: 130px; height: 130px; transform: translate(-50%, -50%); border-radius: 50%; z-index: 0; pointer-events: none;
+  background: radial-gradient(circle, rgba(124, 92, 255, 0.42), rgba(34, 211, 238, 0.08) 60%, transparent 70%); }
+.bs-hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; z-index: 2; }
+.bs-hub b { display: block; font: 700 22px var(--bs-body); letter-spacing: 0.2em; color: #ffffff; text-shadow: 0 0 14px rgba(154, 133, 255, 0.95); }
+.bs-hub small { font: 700 15px var(--bs-num); color: #cbbcff; }
+.bs-legend { position: absolute; left: 16px; bottom: 8px; z-index: 2; font: 12.5px var(--bs-body); color: var(--bs-muted); display: flex; gap: 16px; }
+.bs-legend b { color: var(--bs-ink-2); font-weight: 500; }
+
+/* 訂閱省下多少 */
+.bs-save { display: grid; gap: 12px; padding: 14px 18px; align-content: start; }
+.bs-big { display: flex; align-items: baseline; gap: 10px; }
+.bs-big strong { font: 900 40px var(--bs-num); letter-spacing: 0.02em;
+  background: linear-gradient(90deg, #2ee6a6, #22d3ee); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 10px rgba(46, 230, 166, 0.45)); }
+.bs-big span { font: 500 14px var(--bs-body); color: var(--bs-ink-2); }
+.bs-srow { display: grid; grid-template-columns: 92px 1fr auto; gap: 4px 12px; align-items: center; font-size: 13.5px; }
+.bs-srow .nm { color: #ffffff; font-weight: 700; grid-row: span 2; }
+.bs-srow .tr { height: 10px; background: rgba(47, 123, 255, 0.14); border: 1px solid rgba(47, 123, 255, 0.3); position: relative; }
+.bs-srow .tr i { position: absolute; inset: 0 auto 0 0; }
+.bs-srow .tr.api i { background: linear-gradient(90deg, #2ee6a6, #22d3ee); box-shadow: 0 0 8px rgba(34, 211, 238, 0.5); }
+.bs-srow .tr.fee i { background: #ffb72b; }
+.bs-srow .v { font: 500 13px var(--bs-num); color: var(--bs-ink-2); text-align: right; min-width: 110px; }
+.bs-srow .v.fee { color: #ffb72b; }
+.bs-save-foot { font-size: 12.5px; color: var(--bs-muted); line-height: 1.6; }
+
+/* 最近異常 */
+.bs-events { position: absolute; inset: 0; overflow: hidden; padding: 6px 16px; }
+.bs-events ul { list-style: none; margin: 0; padding: 0; }
+.bs-events li { display: grid; grid-template-columns: 92px 10px 1fr; gap: 10px; align-items: baseline; padding: 8px 0; border-bottom: 1px dashed rgba(47, 123, 255, 0.28); font-size: 13px; line-height: 1.5; color: var(--bs-ink); }
+.bs-events time { font: 500 11.5px var(--bs-num); color: var(--bs-cy); }
+.bs-events .sv { width: 8px; height: 8px; align-self: center; transform: rotate(45deg); background: var(--bs-cy); }
+.bs-events .sv.warn { background: var(--bs-warn); box-shadow: 0 0 6px var(--bs-warn); }
+.bs-events .sv.crit { background: var(--bs-crit); box-shadow: 0 0 6px var(--bs-crit); }
+.bs-events .sv.good { background: var(--bs-good); box-shadow: 0 0 6px var(--bs-good); }
+.bs-track { animation: bs-scroll 40s linear infinite; }
+.bs-events:hover .bs-track { animation-play-state: paused; }
+@keyframes bs-scroll { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+
+.bs-warn-chip { position: absolute; right: 14px; top: 8px; z-index: 2; font: 12.5px var(--bs-body); color: var(--bs-warn); border: 1px solid rgba(255, 183, 43, 0.5); background: rgba(255, 183, 43, 0.1); padding: 2px 8px; }
+.bs-note { position: absolute; left: 0; right: 0; bottom: 4px; text-align: center; font: 12px var(--bs-body); color: var(--bs-muted); letter-spacing: 0.04em; }
+
+/* 動態關閉：頁首的「動態 關」，或「跟隨系統」且系統開了減少動態效果 */
+.bs-still .bs-flow, .bs-still .bs-holo span, .bs-still .bs-track, .bs-still .bs-floor { animation: none !important; }
+.bs-still .bs-stage::after, .bs-still .bs-box::after { display: none; }
+
+/* 翻牌數字的三個框不跑邊框流光：框太扁，光轉到短邊時會一下跳過去，看起來像在閃（2026-09-12 User 回報）。 */
+.bs-counter::after { display: none; }

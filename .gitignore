@@ -1,0 +1,42 @@
+.env
+node_modules/
+.next/
+dashboard/node_modules/
+dashboard/.next/
+*.log
+patch_groq.py
+doc/*.bak-*
+bridge/b.out
+bridge/b.err
+bridge/*.log
+
+# 看板小幫手安裝包的設定檔含推送金鑰，絕不進版控
+helper/helper-config.json
+
+# 修改前的備份檔（.bak-YYYYMMDD），不進版控
+*.bak-*
+
+# 用完即刪的暫時工具資料夾（doc/_暫時-*），不進版控
+doc/_暫時-*
+
+# 隱藏桌面查證用的探針，原始碼進版控、編譯產物不進
+bridge/hidden-desktop/*.exe
+
+# 交付包裡的回報 token，絕不進版控（同 helper/helper-config.json 的理由）
+doc/交付-*/_token.txt
+
+# 交付包的壓縮檔不進版控——裡面含 _token.txt（2026-09-07 誤上傳過一次）
+doc/*.rar
+doc/*.zip
+doc/*.7z
+
+# 公開版：伺服器上的金鑰、佇列、備份、服務帳戶檔，絕不進版控
+keys/
+spool/
+backups/
+secrets/
+*.key
+*-sa.json
+service-account*.json
+.env.*
+!.env.example

@@ -1,0 +1,13 @@
+# 部署到 Linux 的檔案一律 LF，否則 CRLF 會讓 bash 報 "\r: command not found"
+*.sh        text eol=lf
+*.conf      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+.env.example text eol=lf
+scripts/*   text eol=lf
+# PowerShell 5.1 讀無 BOM 的 UTF-8 .ps1 會當成 CP950，含中文的腳本會解析失敗。
+# 這類檔案一律 CRLF＋BOM，寫入時務必用 utf-8-sig。
+*.ps1       text eol=crlf
+# .bat 一律 CRLF。LF 結尾實測會壞（2026-09-01）：cmd 會吃掉整行、
+# 把後半段當成指令執行。這條要放在 scripts/* 後面才蓋得過它的 eol=lf。
+*.bat       text eol=crlf

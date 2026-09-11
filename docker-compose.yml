@@ -1,0 +1,135 @@
+# 專案名稱固定為 costscale。scripts/ 的排程腳本用到 costscale_default 網路與
+# costscale-litellm-1 容器名，資料夾叫什麼都不影響。
+name: costscale
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: costscale
+      POSTGRES_USER: costscale
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5442:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U costscale -d costscale"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4000:4000"
+    # 帶入整份 .env，新增供應商金鑰時不必再改本檔（2026-08-19）
+    env_file:
+      - .env
+    environment:
+      # ?schema=public 不可省：使用者名與擴充 schema 同名（costscale），
+      # 省略時 Postgres search_path 會讓 LiteLLM 把表建進 costscale schema（2026-08-19 踩坑）
+      DATABASE_URL: postgresql://costscale:${DB_PASSWORD}@db:5432/costscale?schema=public
+      # 訂閱橋接的認證 token，閘道用它呼叫家用主機上的橋接服務
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN:-}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      STORE_MODEL_IN_DB: "False"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;u=urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness');sys.exit(0 if u.status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  dashboard:
+    build: ./dashboard
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      DATABASE_URL: postgresql://costscale:${DB_PASSWORD}@db:5432/costscale
+      LITELLM_BASE_URL: http://litellm:4000
+      # 給專案貼的閘道網址（「應用程式」頁的接入範例）。這個服務只拿這裡列出的變數，不讀整份 .env
+      GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      AUTH_SECRET: ${AUTH_SECRET}
+      # 看板（Phase 5）：GitHub 同步與把編輯寫回 doc/status.json 都要它。
+      # 沒設也能跑，只是看板只剩本機推送與草稿，設定頁的 repo 清單會是空的。
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_TOKENS: ${GITHUB_TOKENS:-}
+      # 看板推送通道（各電腦的 push-status.ps1 用）。未設定＝停用（503）。
+      BOARD_PUSH_TOKEN: ${BOARD_PUSH_TOKEN:-}
+      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID}
+      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET}
+      AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS}
+      AUTH_DISABLED: ${AUTH_DISABLED:-0}
+      AUTH_TRUST_HOST: "true"
+      # 預算告警：cron 用 token 呼叫 /api/budgets/check，寄信走下面的 SMTP 設定
+      ALERT_CRON_TOKEN: ${ALERT_CRON_TOKEN:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      # CLI 遙測上報用的 token。未設定時 /api/otel 回 503（停用）
+      OTEL_INGEST_TOKEN: ${OTEL_INGEST_TOKEN:-}
+      # App Hub 看板讀花費用的 token。未設定時 /api/hub/spend 回 503（停用）。
+      # 預設關比預設開安全——忘了設定會得到 503，而不是一個沒有保護的端點。
+      HUB_API_TOKEN: ${HUB_API_TOKEN:-}
+    volumes:
+      # 金鑰管理頁要對出「.env 的哪一把金鑰掛在哪個模型」，而閘道的 /model/info
+      # 刻意不外露 api_key，只能從設定檔取環境變數「名稱」（不是值）。
+      # 掛的是閘道讀的同一份檔案，不是副本——副本會漂移。
+      - ./litellm-config.yaml:/app/litellm-config.yaml:ro
+      # 「新增上游金鑰」的待套用佇列（2026-09-07）。
+      #
+      # **儀表板只能寫這一個目錄，其餘什麼都碰不到。** 它不掛 .env、
+      # 不掛 docker socket——把 docker socket 掛進一個對外的網頁應用，
+      # 等於那個應用可以控制整台機器上所有容器，代價不成比例。
+      # 真正去改 .env 與 config、重啟閘道、失敗回滾的是主機端的
+      # scripts/apply-upstream-key.py，由 cron 每分鐘跑一次。
+      #
+      # 請求檔含明文金鑰，所以目錄權限 700、檔案 600，套用後立刻刪除。
+      - ./spool/upstream-keys:/app/spool/upstream-keys
+    # 容器裡的 127.0.0.1 是容器自己，打不到主機上的服務（例如自架的郵件伺服器）。
+    # host-gateway 讓 host.docker.internal 指向 Docker 橋接的主機位址。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: ["full"]
+
+volumes:
+  dbdata:
+
+# 網段固定為 10.87.213.0/24，**訂閱橋接靠它**：
+# 家用電腦的 SSH 反向隧道綁在 10.87.213.1（這個網路在主機上的位址），
+# litellm-config.yaml 的 sub-* 模型也打這個位址。
+#
+# 為什麼不用 Docker 自動分配：自動分配是從 172.17、172.18… 依序往下拿，
+# 同一台主機上建過幾個專案之後，每個網路拿到哪一段無法預先知道，
+# 寫死的橋接位址就會對不上。10.x 不在 Docker 的自動分配範圍內，不會被別的專案先拿走。
+#
+# 若主機本身的網路（例如雲端的私有網路）剛好也用 10.87.213.x，`up` 會報 Pool overlaps。
+# 那時把下面兩行，以及 litellm-config.yaml、bridge/supervisor.ps1、
+# scripts/run-sub-usage-fetch.sh、scripts/fetch-sub-usage.py、dashboard/lib/routing.ts
+# 裡的 10.87.213.1 一起換成別的網段。
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.87.213.0/24
+          gateway: 10.87.213.1

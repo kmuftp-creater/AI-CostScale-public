@@ -1,0 +1,26 @@
+# 正式機覆寫檔。正式機上的每一個 compose 指令都要疊這個檔：
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d
+#
+# 對外埠位：資料庫 5436、閘道 4400、儀表板 3300（全部只綁 127.0.0.1，由 nginx 對外）。
+# scripts/ 底下的排程腳本與 deploy/ 的 nginx 範例都照這組埠位寫，
+# 要改埠的話那些檔案要一起改。
+services:
+  db:
+    ports: !override
+      - "127.0.0.1:5436:5432"
+
+  litellm:
+    ports: !override
+      - "127.0.0.1:4400:4000"
+    environment:
+      # Vertex AI 服務帳戶金鑰。不用 Vertex 可以不放這個檔，閘道照樣啟動。
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/vertex-sa.json
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+      - /root/vertex-sa.json:/secrets/vertex-sa.json:ro
+
+  dashboard:
+    ports: !override
+      - "127.0.0.1:3300:3000"
+    environment:
+      AUTH_URL: ${AUTH_URL}

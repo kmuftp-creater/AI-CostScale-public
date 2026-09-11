@@ -1,0 +1,328 @@
+# AI CostScale · LiteLLM 閘道組態（Phase 1）
+# 命名規約：<模型>-free / <模型>-sub / <模型>-paid。
+#
+# 注意：本檔**沒有**設定 fallbacks，爆額（429）時閘道不會自動退到 paid。
+# 這行原本寫「依 fallbacks 自動退到 paid」，與 router_settings 的實際設定相反，
+# 2026-08-20 更正。跨供應商降級一律由呼叫端專案決定，理由見 router_settings 的註解。
+#
+# 金鑰實測狀態（2026-08-24 更新）：
+#   可用  gemini-3.1-flash-lite、gemini-flash-free、gemini-studio-paid、
+#         groq-large、groq-fast、openrouter-auto
+#   停用  gpt-paid、claude-sonnet-paid ——金鑰無效，2026-08-24 起整段註解掉。
+#         閘道不再列出這兩個模型（/v1/models 由 20 個降為 18 個），
+#         呼叫它們會回 HTTP 400 no healthy deployments。
+#         買到真金鑰後把註解拿掉即可，做法寫在該段的註解裡。
+
+model_list:
+  # ══ 免費層：Google AI Studio 免費額度，5 把金鑰輪替 ══
+  - model_name: gemini-flash-free
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_FREE_KEY_1
+      rpm: 10
+    model_info:
+      pricing_type: free
+
+  - model_name: gemini-flash-free
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_FREE_KEY_2
+      rpm: 10
+    model_info:
+      pricing_type: free
+
+  - model_name: gemini-flash-free
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_FREE_KEY_3
+      rpm: 10
+    model_info:
+      pricing_type: free
+
+  - model_name: gemini-flash-free
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_FREE_KEY_4
+      rpm: 10
+    model_info:
+      pricing_type: free
+
+  - model_name: gemini-flash-free
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_FREE_KEY_5
+      rpm: 10
+    model_info:
+      pricing_type: free
+
+  # ══ Vertex AI：吃 GCP 試用額度，目前實際零費用 ══
+  - model_name: gemini-3.1-flash-lite
+    litellm_params:
+      model: vertex_ai/gemini-3.1-flash-lite
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: vertex_ai/gemini-2.5-flash
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  - model_name: gemini-flash-paid
+    litellm_params:
+      model: vertex_ai/gemini-2.5-flash
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  - model_name: gemini-lite-paid
+    litellm_params:
+      model: vertex_ai/gemini-3.1-flash-lite
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  # 萬用比對：其餘 gemini-* 一律走 Vertex，新專案不必再加設定
+  - model_name: "gemini-*"
+    litellm_params:
+      model: "vertex_ai/gemini-*"
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  # ══ 影像生成（走 Vertex；實測回傳 PNG inlineData）══
+  - model_name: gemini-3.1-flash-image
+    litellm_params:
+      model: vertex_ai/gemini-3.1-flash-image
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  - model_name: gemini-2.5-flash-image
+    litellm_params:
+      model: vertex_ai/gemini-2.5-flash-image
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  # ══ 嵌入向量（只有 OpenAI 格式 /v1/embeddings 可用；
+  #    Gemini 原生 :embedContent 在 LiteLLM 沒有對應路由，會 404）══
+  - model_name: gemini-embedding-001
+    litellm_params:
+      model: vertex_ai/gemini-embedding-001
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  # ══ AI Studio 付費金鑰（Vertex 額度用罄後的第二層付費）══
+  - model_name: gemini-studio-paid
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_PAID_KEY
+    model_info:
+      pricing_type: payg
+
+  # ══ Groq：3 把金鑰輪替 ══
+  - model_name: groq-large
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_KEY_1
+    model_info:
+      pricing_type: free
+
+  - model_name: groq-large
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_KEY_2
+    model_info:
+      pricing_type: free
+
+  - model_name: groq-large
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_KEY_3
+    model_info:
+      pricing_type: free
+
+  - model_name: groq-fast
+    litellm_params:
+      model: groq/openai/gpt-oss-20b
+      api_key: os.environ/GROQ_KEY_1
+    model_info:
+      pricing_type: free
+
+  - model_name: groq-fast
+    litellm_params:
+      model: groq/openai/gpt-oss-20b
+      api_key: os.environ/GROQ_KEY_2
+    model_info:
+      pricing_type: free
+
+  - model_name: groq-fast
+    litellm_params:
+      model: groq/openai/gpt-oss-20b
+      api_key: os.environ/GROQ_KEY_3
+    model_info:
+      pricing_type: free
+
+  # ══ OpenRouter ══
+  - model_name: openrouter-auto
+    litellm_params:
+      model: openrouter/auto
+      api_key: os.environ/OPENROUTER_API_KEY
+    model_info:
+      pricing_type: payg
+
+  - model_name: "openrouter-*"
+    litellm_params:
+      model: "openrouter/*"
+      api_key: os.environ/OPENROUTER_API_KEY
+    model_info:
+      pricing_type: payg
+
+  # ══ 其他供應商：**目前停用**（2026-08-24）══
+  #
+  # 下面兩個部署原本是啟用的，但金鑰是無效值——8/23 實打確認
+  # claude-sonnet-paid 回 invalid x-api-key、gpt-paid 回
+  # Incorrect API key provided: placeholder（那個值字面上就是 placeholder）。
+  #
+  # 啟用著的壞部署比不存在更難查：呼叫端拿到的是上游的認證錯誤，
+  # 看起來像「金鑰過期了」，而不是「這條路本來就沒通」。
+  # 所以整段註解掉。註解後實打的回應（2026-08-24 從 llm.example.com 打）：
+  #   HTTP 400 · "You passed in model=gpt-paid. There are no healthy
+  #   deployments for this model."
+  # 一眼就看得出是路由不存在，不是金鑰有問題。
+  #
+  # **要重新啟用：** 把 .env 的 ANTHROPIC_API_KEY／OPENAI_API_KEY 填成真金鑰，
+  # 再把下面每一行前面的 `# ` 拿掉，然後 `docker compose restart litellm`。
+  # .env 那兩個變數刻意保留（User 2026-08-24 裁決），它們是預留欄位。
+  #
+  # - model_name: claude-sonnet-paid
+  #   litellm_params:
+  #     model: anthropic/claude-sonnet-5
+  #     api_key: os.environ/ANTHROPIC_API_KEY
+  #   model_info:
+  #     pricing_type: payg
+  #
+  # - model_name: gpt-paid
+  #   litellm_params:
+  #     model: openai/gpt-5.2
+  #     api_key: os.environ/OPENAI_API_KEY
+  #   model_info:
+  #     pricing_type: payg
+
+  # ══ 訂閱橋接（Phase 3）══
+  # 走 SSH 反向隧道連到家用主機上的橋接服務，由它叫本機已登入的 CLI，
+  # 吃的是訂閱額度而非 API 金鑰。家機關機時這三個會打不通——
+  # 這是刻意的，閘道不設 fallbacks，要不要降級由呼叫端專案決定。
+  #
+  # 10.87.213.1 是 costscale_default 網路的閘道位址（＝VPS 主機）。
+  # 隧道綁在那裡而不是 127.0.0.1，因為容器碰不到主機的 loopback。
+  #
+  # 只有個人自用的專案可以打這三個。付費產品不走訂閱——那等於轉賣訂閱，
+  # 會踩服務條款，帳號被停時連 User 自己的 CLI 都會一起死。
+  #
+  # 命名用 sub- 前綴不是隨意的：金鑰白名單支援萬用比對，若叫 gemini-sub，
+  # 則 `gemini-*` 會連訂閱一起放行，等於在沒有錯誤訊息的情況下把訂閱送出去。
+  # 前綴命名讓 `sub-*` 可以整組授權，也讓供應商萬用比對不會誤中。
+  - model_name: sub-claude
+    litellm_params:
+      model: openai/sub-claude
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-codex
+    litellm_params:
+      model: openai/sub-codex
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-gemini
+    litellm_params:
+      model: openai/sub-gemini
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  # Antigravity 訂閱附的 Claude 額度（2026-08-29）。同一支 agy CLI、同一個帳號，
+  # 但 --model 換成 claude-opus-4-6-thinking 之後吃的是「Claude and GPT models」
+  # 那一組配額，跟 sub-gemini 的 Gemini 組是兩個獨立的池，
+  # 也**跟 sub-claude（Claude Code 訂閱）完全無關**，不要當成同一份額度。
+  #
+  # 這條的量非常小，排備援鏈之前先看數字：實測一次呼叫固定 19,146 個 input token，
+  # 吃掉 Claude+GPT 5h 視窗的 2.39%——**5 小時大約只夠 41 次**，
+  # 扣掉橋接 20% 的保留線之後實際可用約 33 次。適合「量少、可以等」，不適合批次。
+  #
+  # 模型由橋接寫死（BRIDGE_AGY_CLAUDE_MODEL），呼叫端不能指定：
+  # 額度守門是按池分的，讓呼叫端換模型等於讓它繞過守門去吃另一個池。
+  - model_name: sub-agy-claude
+    litellm_params:
+      model: openai/sub-agy-claude
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  # 產圖（2026-08-21）。走橋接的 /v1/images/generations，用 Codex 內建的
+  # image_gen 工具，吃 Codex 訂閱的週額度，不需要也不會用到 OpenAI 金鑰。
+  #
+  # mode 必須寫 image_generation，否則閘道會把它當文字模型，
+  # 打 /v1/images/generations 會找不到部署。
+  #
+  # 與 sub-codex 是同一個額度池，分成兩個名稱只因為端點不同。
+  # 呼叫端不能帶 size（尺寸不可控，帶了回 400），也不支援 n>1。
+  - model_name: sub-imagegen
+    litellm_params:
+      model: openai/sub-imagegen
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+      mode: image_generation
+
+# 每月硬上限的歸零時區（2026-09-12，User 裁決「本月」改台北時間）。
+# 沒設時 LiteLLM 預設 UTC，budget_duration=1mo 會在台北每月 1 日 08:00 才歸零。
+litellm_settings:
+  timezone: Asia/Taipei
+router_settings:
+  # 刻意不設 fallbacks：跨供應商的降級順序一律由「呼叫端專案」決定。
+  # 閘道若自作主張改打別的供應商，會違背專案端的設定意圖
+  # （例如專案已關閉 Vertex，閘道卻仍打過去）。2026-08-19 User 明確要求。
+  # 同一個 model_name 底下的多把金鑰輪替不受影響，那屬於同一供應商內的負載平衡。
+  num_retries: 2
+  cooldown_time: 30
+  routing_strategy: simple-shuffle
+
+# Vertex AI 直通：讓專案用虛擬金鑰打原生 Vertex 端點（含 predict 這類
+# 非 generateContent 家族的模型，例如 virtual-try-on-001）。
+# 閘道用自己掛載的服務帳戶去打。
+#
+# 注意：專案端仍須保留自己的 GCP 憑證檔。@google/genai 在送出請求前一定會
+# 載入 ADC，載不到直接失敗，即使它最後不使用那個 token（2026-08-20 某個試穿專案實測）。
+# 只有改用純 REST 呼叫才真的不需要憑證。
+#
+# 注意：直通是原樣轉發，不套用虛擬金鑰的模型限制。模型白名單做在 nginx，
+# 見 deploy/nginx-llm-vertex-whitelist.conf。
+default_vertex_config:
+  vertex_project: os.environ/VERTEX_PROJECT
+  vertex_location: global
+  vertex_credentials: /secrets/vertex-sa.json
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL

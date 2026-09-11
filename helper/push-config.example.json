@@ -1,0 +1,9 @@
+{
+  "targets": [
+    {
+      "url": "https://cost.example.com",
+      "path": "/api/board/push",
+      "token": "BOARD_PUSH_TOKEN_FROM_COSTSCALE"
+    }
+  ]
+}
