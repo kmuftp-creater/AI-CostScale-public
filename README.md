@@ -81,4 +81,6 @@ skills/costscale-install/ 帶你安裝這套軟體的 Claude Code skill
 
 ## 授權
 
+> `dashboard/public/private/` 裡的文字貼紙圖是網友自製、非官方的第三方圖檔，不在 MIT 授權範圍內，詳見該目錄的 `THIRD-PARTY-NOTICE.md`。
+
 [MIT](LICENSE)

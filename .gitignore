@@ -46,4 +46,14 @@ collector/_token.txt
 collector/_url.txt
 
 # 大屏「作戰指揮」外觀的私有素材（第三方圖檔），只放在本機與正式機，絕不進版控
-dashboard/public/private/
+dashboard/public/private/*
+# 例外：網友設計、非官方的文字貼紙，User 明確允許放進公開版（2026-09-13）。
+# 不在 MIT 授權範圍內，說明見 dashboard/public/private/THIRD-PARTY-NOTICE.md
+!dashboard/public/private/alarm.png
+!dashboard/public/private/sortie.png
+!dashboard/public/private/berserk.png
+!dashboard/public/private/secret.png
+!dashboard/public/private/secret2.png
+!dashboard/public/private/agency.png
+!dashboard/public/private/power.png
+!dashboard/public/private/THIRD-PARTY-NOTICE.md
