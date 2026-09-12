@@ -8,6 +8,7 @@ import { LineChart, PieChart, GaugeChart, BarChart, LinesChart, ScatterChart } f
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent, MarkPointComponent } from "echarts/components";
 import { SVGRenderer } from "echarts/renderers";
 import type { BigScreenData } from "@/lib/bigscreen";
+import { SKIN_KEY, SKIN_ORDER, SKIN_NAME, SKIN_CLASS, type Skin } from "./skins";
 
 echarts.use([LineChart, PieChart, GaugeChart, BarChart, LinesChart, ScatterChart,
   GridComponent, TooltipComponent, LegendComponent, TitleComponent, MarkPointComponent, SVGRenderer]);
@@ -39,10 +40,6 @@ const MOTION_KEY = "costscale-bigscreen-motion";
  * 兩套的軟體類別色與模型色階都用 dataviz 的驗證器跑過（深色底，類別與 ordinal 兩種模式）：
  * nerv 的第一版橘／琥珀／紅彼此只差 ΔE 3，色盲與一般視力都分不出來，退回現在這組才全過。
  */
-export type Skin = "cyber" | "nerv";
-export const SKIN_KEY = "costscale-bigscreen-skin";
-export const SKIN_ORDER: Skin[] = ["cyber", "nerv"];
-export const SKIN_NAME: Record<Skin, string> = { cyber: "藍紫科幻", nerv: "黑橘警戒" };
 /** 伺服器端配色（lib/bigscreen.ts）給「不分配顏色」的軟體用的灰，換皮時要原樣保留灰。 */
 const SERVER_GRAY = "#56699a";
 
@@ -98,6 +95,33 @@ const SKINS = {
     head: { g1: "#c24a00", g2: "#160a03", edge: "#ff7a18", rail: "#8a4a10", l1: "#ff7a18", l2: "#ffe9c7", l3: "#7ee787", flow: "#ffd9a8", chipA: "#ff7a18", chipB: "#ffcc00", chipC: "#7ee787" },
     // 紅色留給「有事」的那幾塊：異常、失敗、告警（2026-09-12 User：「而且沒有紅色」）
     acc: { daily: "#ff7a18", mix: "#ffb056", free: "#7ee787", calls: "#ff6a00", tokens: "#7ee787", spend: "#ffcc00", topo: "#f2801a", hour: "#7ee787", rank: "#ffcc00", save: "#7ee787", events: "#ff1f0f" },
+  },
+  // 作戰指揮：骨架與黑橘警戒相同（樣式靠 bs-nerv），這裡只調圖表用得到的幾個顏色——
+  // 白色進來當第三個顏色（面板標題、主要數字），紅色出現得更多。
+  cmd: {
+    ramp: ["#ffffff", "#ffd9a8", "#ff9a3d", "#c24a00"],
+    hub: "#ff6a00",
+    fail: "#ff1f0f",
+    gray: "#7b7468",
+    idle: "#403c36",
+    line: "#ffffff",
+    apps: ["#ff6a00", "#ffffff", "#7ee787", "#ff1f0f", "#ffcc00", "#9a85ff"] as string[] | null,
+    flat: true,
+    C: { cy: "#ff6a00", good: "#7ee787", warn: "#ffcc00", crit: "#ff1f0f", ink: "#ffffff", ink2: "#d8cec0", muted: "#8a7c66", grid: "rgba(255,255,255,0.12)" },
+    tip: { bg: "#0b0805", border: "#ffffff" },
+    daily: ["#c24a00", "#ff6a00", "#ffffff"],
+    dailyGlow: "rgba(255,106,0,0.45)",
+    dailyArea: ["rgba(255,106,0,0.34)", "rgba(255,106,0,0.08)", "rgba(255,106,0,0)"],
+    hourBar: ["#ffffff", "#7ee787", "rgba(126,231,135,0.10)"],
+    hourPeak: ["#ff1f0f", "rgba(255,31,15,0.2)"],
+    ring: "rgba(255,255,255,0.22)",
+    pieBorder: "#0b0805",
+    track: "rgba(255,255,255,0.10)",
+    gaugeTrack: "rgba(255,255,255,0.12)",
+    gaugeTick: "rgba(255,255,255,0.30)",
+    modelWord: "橘",
+    head: { g1: "#c24a00", g2: "#160a03", edge: "#ffffff", rail: "#8a4a10", l1: "#ff6a00", l2: "#ffffff", l3: "#ff1f0f", flow: "#ffffff", chipA: "#ff6a00", chipB: "#ffffff", chipC: "#ff1f0f" },
+    acc: { daily: "#ff6a00", mix: "#ffffff", free: "#7ee787", calls: "#ffffff", tokens: "#7ee787", spend: "#ffcc00", topo: "#ff6a00", hour: "#7ee787", rank: "#ffcc00", save: "#7ee787", events: "#ff1f0f" },
   },
 } as const;
 
@@ -219,7 +243,13 @@ function Box({ acc, title, note, src, idx, children, className = "" }: {
   );
 }
 
-export default function BigScreenClient({ data, numFont, initialSkin }: { data: BigScreenData; numFont: string; initialSkin?: Skin | null }) {
+export default function BigScreenClient({ data, numFont, initialSkin, assets }: {
+  data: BigScreenData;
+  numFont: string;
+  initialSkin?: Skin | null;
+  /** public/private/ 底下的素材網址（page.tsx 在伺服器端找 png／jpg／webp）。沒放就是 null，改用原創徽章。 */
+  assets?: { logo: string | null; mark: string | null };
+}) {
   const router = useRouter();
   const vpRef = useRef<HTMLDivElement>(null);
   const stRef = useRef<HTMLDivElement>(null);
@@ -266,7 +296,7 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
         localStorage.setItem(SKIN_KEY, initialSkin);
       } else {
         const sk = localStorage.getItem(SKIN_KEY);
-        if (sk === "cyber" || sk === "nerv") setSkin(sk);
+        if (sk === "cyber" || sk === "nerv" || sk === "cmd") setSkin(sk as Skin);
       }
     } catch { /* 無痕視窗讀不到就用預設 */ }
     const onFs = () => setIsFull(!!document.fullscreenElement);
@@ -285,7 +315,8 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
   useEffect(() => {
     const root = vpRef.current?.closest(".bs");
     if (!root) return;
-    root.classList.toggle("bs-nerv", skin === "nerv");
+    for (const s of SKIN_ORDER) for (const c of SKIN_CLASS[s]) root.classList.remove(c);
+    for (const c of SKIN_CLASS[skin]) root.classList.add(c);
   }, [skin]);
 
   const chooseMotion = (m: Motion) => {
@@ -505,6 +536,19 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
     <div className={`bs-root ${still ? "bs-still" : ""}`}>
       <div className="bs-viewport" ref={vpRef}>
         <div className="bs-stage" ref={stRef}>
+          {skin === "cmd" ? (
+            <>
+              {/* 側邊直排字與警戒橫幅：純造型，字是我們自己的 */}
+              <div className="bs-edge bs-edge-l" aria-hidden="true">監 視 中</div>
+              <div className="bs-edge bs-edge-r" aria-hidden="true">記 錄 中</div>
+              {/* 失敗數是真的資料：有失敗才亮紅幅，沒有就顯示正常 */}
+              <div className={`bs-alarm ${data.month.failed ? "on" : ""}`}>
+                {data.month.failed
+                  ? `本月偵測到 ${fmtInt(data.month.failed)} 筆失敗請求`
+                  : "本月無失敗請求"}
+              </div>
+            </>
+          ) : null}
           <header className="bs-head">
             <svg viewBox="0 0 1920 92" width="1920" height="92" aria-hidden="true">
               <defs>
@@ -524,7 +568,10 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
               <rect x="1386" y="10" width="14" height="6" transform="skewX(35)" fill={P.head.chipB} />
               <rect x="1404" y="10" width="22" height="6" transform="skewX(35)" fill={P.head.chipC} />
             </svg>
-            {P.flat ? <Emblem /> : null}
+            {P.flat ? (assets?.logo ? (
+              // 私有素材：檔案在 public/private/logo.png（不進版控）。沒有檔就走原創徽章。
+              <div className="bs-emblem bs-emblem-img"><img src={assets.logo} alt="" /></div>
+            ) : <Emblem />) : null}
             <div className="bs-sub-l"><span>{dateLabel}</span><span>AI 用量與成本</span></div>
             <h1>CostScale AI 閘道營運大屏</h1>
             <div className="bs-sub-r">
@@ -582,6 +629,8 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
             </div>
 
             <Box idx={3} acc={A.topo} title="流量拓撲" note="軟體 → 閘道 → 模型 · 本月呼叫次數 · 線越粗越多" src="SRC · SpendLogs × apps" className="bs-topo">
+              {/* 私有素材：舞台其他地方都被面板蓋住，放這裡才看得到（壓得很暗，只當氣氛） */}
+              {skin === "cmd" && assets?.mark ? <img className="bs-pmark" src={assets.mark} alt="" aria-hidden="true" /> : null}
               <div className="bs-floor" />
               <div className="bs-holo"><span className="d1" /><span className="d2" /><span className="d3" /></div>
               <div className="bs-beam" />
@@ -616,7 +665,7 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
                 </div>
               </div>
             </Box>
-            <Box idx={7} acc={A.events} title="最近異常" note="失敗的請求＋預算告警 · 滑過暫停" src="SRC · SpendLogs · budget_alerts">
+            <Box idx={7} className="bs-ev" acc={A.events} title="最近異常" note="失敗的請求＋預算告警 · 滑過暫停" src="SRC · SpendLogs · budget_alerts">
               <div className="bs-events">
                 <div className="bs-track">
                   {[0, 1].map((k) => (

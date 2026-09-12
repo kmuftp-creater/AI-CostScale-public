@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { SKIN_KEY, SKIN_ORDER, SKIN_NAME, type Skin } from "@/app/bigscreen/BigScreenClient";
+import { SKIN_KEY, SKIN_ORDER, SKIN_NAME, type Skin } from "@/app/bigscreen/skins";
 
 /**
  * 頁首的「切換到大屏」（2026-09-12）。

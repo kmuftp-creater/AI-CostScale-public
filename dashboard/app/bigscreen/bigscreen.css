@@ -514,3 +514,107 @@
   animation: bs-nv-dash 1.15s linear infinite;
 }
 .bs-nerv .bs-still .bs-topo .bs-chart svg path[fill="none"] { animation: none; stroke-dasharray: none; }
+
+/* ══ 外觀三：作戰指揮（2026-09-13）══
+   User 要「整個大屏充滿那種感覺」，所以這一版比黑橘警戒更重：
+   白色進來當第三個顏色、側邊直排字、警戒橫幅、六角格背景、掃描線。
+
+   實作上是**黑橘警戒 ＋ 一層**：根元素同時掛 .bs-nerv 與 .bs-cmd，
+   所以上面那一整套扁平造型全部繼承，這裡只加差異。
+
+   **這一層沒有任何第三方素材**，全部是 CSS 與我們自己的字。
+   私有素材（logo.png、mark.png）放在 public/private/，那個目錄不進版控；
+   有檔才顯示，沒檔就用原創徽章，所以公開版看起來是完整的。 */
+.bs-cmd {
+  --bs-ink: #ffffff;
+  --bs-ink-2: #d8cec0;
+  --nv-red: #ff1f0f;
+}
+
+/* 背景：六角格＋掃描線，比黑橘警戒更密 */
+.bs-cmd .bs-stage {
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(60deg, rgba(255, 106, 0, 0.07) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(-60deg, rgba(255, 106, 0, 0.07) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(0deg, rgba(255, 106, 0, 0.07) 0 1px, transparent 1px 30px),
+    linear-gradient(180deg, #14100b, #060504 55%);
+}
+
+/* 標題：白色實心、字距更寬 */
+.bs-cmd .bs-head h1 {
+  color: #ffffff; -webkit-text-fill-color: #ffffff;
+  letter-spacing: 0.5em; font-weight: 900;
+}
+.bs-cmd .bs-head::after { opacity: 1; }
+
+/* 面板標題列：黑底白字加白框，只有異常那塊是紅底 */
+.bs-cmd .bs-bt { background: #0b0805; border-bottom: 2px solid var(--acc); }
+.bs-cmd .bs-bt span { color: #ffffff; letter-spacing: 0.34em; }
+.bs-cmd .bs-bt em { color: var(--bs-ink-2); }
+.bs-cmd .bs-bt i { background: var(--acc); }
+.bs-cmd .bs-box { border-color: rgba(255, 255, 255, 0.45); }
+.bs-cmd .bs-box::before { background-image:
+    linear-gradient(#ffffff, #ffffff), linear-gradient(#ffffff, #ffffff),
+    linear-gradient(#ffffff, #ffffff), linear-gradient(#ffffff, #ffffff),
+    linear-gradient(#ffffff, #ffffff), linear-gradient(#ffffff, #ffffff),
+    linear-gradient(#ffffff, #ffffff), linear-gradient(#ffffff, #ffffff);
+  opacity: 0.7; }
+
+/* 三個數字框：白框黑底，橘色七段數字，標題列白底黑字 */
+.bs-cmd .bs-counter { border-color: #ffffff; }
+.bs-cmd .bs-counter .bs-lab { background: #ffffff; color: #0b0805; }
+.bs-cmd .bs-seg7 .on { fill: #ff6a00; }
+.bs-cmd .bs-seg7 .off { fill: rgba(255, 106, 0, 0.12); }
+.bs-cmd .bs-digits s { color: #ffffff; }
+
+/* 側邊直排字：純造型，字是我們自己的 */
+.bs-cmd .bs-edge {
+  position: absolute; top: 120px; z-index: 5; pointer-events: none;
+  writing-mode: vertical-rl; text-orientation: upright;
+  font: 900 20px var(--bs-body); letter-spacing: 0.4em;
+  color: rgba(255, 255, 255, 0.32);
+}
+.bs-cmd .bs-edge-l { left: 4px; }
+.bs-cmd .bs-edge-r { right: 4px; }
+
+/* 警戒橫幅：資料驅動——有失敗才亮紅並閃，沒有就是白框黑底的正常狀態 */
+.bs-cmd .bs-alarm {
+  position: absolute; left: 516px; width: 888px; top: 96px; height: 26px; z-index: 5;
+  display: flex; align-items: center; justify-content: center;
+  font: 900 14px var(--bs-body); letter-spacing: 0.3em;
+  border: 2px solid rgba(255, 255, 255, 0.5); background: #0b0805; color: var(--bs-ink-2);
+}
+.bs-cmd .bs-alarm.on {
+  border-color: var(--nv-red); background: var(--nv-red); color: #0b0805;
+  animation: bs-cmd-blink 1.1s steps(1, end) infinite;
+}
+@keyframes bs-cmd-blink { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0.35; } }
+.bs-cmd .bs-still .bs-alarm.on { animation: none; }
+/* 橫幅佔掉 26px，三欄跟著往下讓，不要壓到面板 */
+.bs-cmd .bs-col { top: 132px; }
+.bs-cmd .bs-left, .bs-cmd .bs-right { grid-template-rows: 318px 306px 278px; }
+.bs-cmd .bs-mid { grid-template-rows: 142px 502px 256px; }
+
+/* 私有素材：頁首的 logo 檔（有放才會出現） */
+.bs-cmd .bs-emblem-img img, .bs-nerv .bs-emblem-img img { height: 58px; width: auto; display: block; }
+.bs-emblem-img { gap: 0; }
+/* 私有素材：放在拓撲面板裡的右側，壓暗當氣氛（舞台其他地方都被面板蓋住，看不到） */
+.bs-cmd .bs-pmark {
+  position: absolute; right: -30px; bottom: -14px; height: 104%; width: auto; z-index: 0;
+  /* 很淡：模型名稱壓在它上面，0.2 的時候字就讀不清了（2026-09-13 調過一次） */
+  opacity: 0.085; filter: contrast(1.05) saturate(0.85); pointer-events: none;
+  -webkit-mask-image: linear-gradient(to left, #000 0 12%, transparent 70%);
+  mask-image: linear-gradient(to left, #000 0 12%, transparent 70%);
+}
+
+/* 拓撲：中央的「閘道」牌子改白底黑字，準星白色 */
+.bs-cmd .bs-hub b { background: #ffffff; color: #0b0805; }
+.bs-cmd .bs-hub small { color: #ffffff; }
+.bs-cmd .bs-holo .d2 { border-color: #ffffff; }
+.bs-cmd .bs-holo .d1 { border-color: rgba(255, 255, 255, 0.45); }
+
+/* 最近異常：紅底白字的標題列 */
+.bs-cmd .bs-box.bs-ev .bs-bt { background: var(--nv-red); border-bottom-color: #ffffff; }
+.bs-cmd .bs-box.bs-ev .bs-bt span, .bs-cmd .bs-box.bs-ev .bs-bt em { color: #0b0805; }
+.bs-cmd .bs-box.bs-ev .bs-bt i { background: #0b0805; }

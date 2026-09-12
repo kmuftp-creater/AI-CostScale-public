@@ -44,3 +44,6 @@ service-account*.json
 # 收集器預填的網址與 token（做成雙擊就好的包時用），含機密，不進版控
 collector/_token.txt
 collector/_url.txt
+
+# 大屏「作戰指揮」外觀的私有素材（第三方圖檔），只放在本機與正式機，絕不進版控
+dashboard/public/private/
