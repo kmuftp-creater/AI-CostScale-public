@@ -276,17 +276,32 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
   const TIP = { backgroundColor: P.tip.bg, borderColor: P.tip.border, borderWidth: 1, textStyle: { color: C.ink, fontSize: 13 } };
 
   // ── 縮放（最先做：頁面高度靠它）──
+  // 不能只聽 window resize：載入後設定高度 → 頁面冒出垂直捲軸 → 可視寬度少約 17px，
+  // 但 window 沒有 resize，舞台就比畫面寬、最右邊被切掉，要按一次全螢幕才會恢復
+  // （2026-09-13 User：「右側都要先全螢幕後再縮回來，才不會被擠壓到」）。
+  // 所以改聽容器本身的寬度（ResizeObserver，捲軸出現也會觸發）。
+  // 防抖動：視窗高度剛好卡在「有捲軸／沒捲軸」兩種高度之間時，會縮小 → 捲軸消失 → 放大 → 捲軸又出現，
+  // 無限來回。縮小後 300ms 內的小幅放大（≤ 24px，捲軸寬度的量級）一律忽略。
   useEffect(() => {
+    const vp = vpRef.current, st = stRef.current;
+    if (!vp || !st) return;
+    let lastW = 0, lastShrink = 0;
     const fit = () => {
-      const vp = vpRef.current, st = stRef.current;
-      if (!vp || !st) return;
-      const s = vp.clientWidth / 1920;
+      const w = vp.clientWidth;
+      if (!w || w === lastW) return;
+      const now = performance.now();
+      if (w > lastW && lastW && w - lastW <= 24 && now - lastShrink < 300) return;
+      if (w < lastW) lastShrink = now;
+      lastW = w;
+      const s = w / 1920;
       st.style.transform = `scale(${s})`;
       vp.style.height = `${1080 * s}px`;
     };
     fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(vp);
     window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
+    return () => { ro.disconnect(); window.removeEventListener("resize", fit); };
   }, []);
 
   // ── 動態偏好、系統設定、全螢幕狀態 ──

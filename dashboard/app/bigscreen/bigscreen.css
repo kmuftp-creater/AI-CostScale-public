@@ -597,6 +597,12 @@
 /* 橫幅佔掉 26px，三欄跟著往下讓，不要壓到面板 */
 .bs-cmd .bs-col { top: 132px; }
 .bs-cmd .bs-left, .bs-cmd .bs-right { grid-template-rows: 318px 306px 278px; }
+/* 左右兩欄各往內縮 16px，讓出側邊直排字的位置。
+   量過（2026-09-13）：側邊字欄在 x 4～32 與 1888～1916，原本面板從 20 開始、到 1900 結束，
+   兩邊各壓 12px——User 看到的「右側被擠壓」就是這個，跟縮放或全螢幕無關。
+   縮完：左欄 36～500、右欄 1420～1884，側邊字各留 4px 空隙；中欄 516～1404 不動。 */
+.bs-cmd .bs-left { left: 36px; width: 464px; }
+.bs-cmd .bs-right { width: 464px; }
 .bs-cmd .bs-mid { grid-template-rows: 142px 502px 256px; }
 
 /* 私有素材：頁首的 logo 檔（有放才會出現） */
@@ -692,7 +698,8 @@
 .bs-cmd .bs-fig-mix  { right: 6px;  bottom: 0; height: 96%; }
 .bs-cmd .bs-fig-free { right: -10px; bottom: -4px; height: 62%; opacity: 0.52; }
 .bs-cmd .bs-fig-hour { right: 8px;  bottom: 0; height: 94%; }
-.bs-cmd .bs-fig-save { right: 4px;  bottom: 0; height: 62%; opacity: 0.38; }
+/* 訂閱省下多少：左右對稱的構圖，放正中間；往上抬 40px 讓手套落在兩條長條之間、避開說明文字 */
+.bs-cmd .bs-fig-save { left: 50%; transform: translateX(-50%); bottom: 40px; height: 72%; opacity: 0.28; }
 
 /* 每日閘道花費：機體圖（已去背，所以透明度可以拉高一點；左側漸層遮罩讓它不跟折線打架） */
 .bs-cmd .bs-unitmark {
