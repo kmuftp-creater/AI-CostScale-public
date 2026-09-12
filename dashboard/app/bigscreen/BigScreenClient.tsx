@@ -24,7 +24,10 @@ echarts.use([LineChart, PieChart, GaugeChart, BarChart, LinesChart, ScatterChart
  */
 
 const G = echarts.graphic.LinearGradient;
-type Motion = "system" | "on" | "off";
+// 動態效果只有開／關。原本還有「跟隨系統」，2026-09-12 User：「跟隨系統這應該不用吧」——
+// 三個選項要使用者先搞懂「系統現在是開還是關」才知道自己選到什麼，多一層不必要的理解成本。
+// 系統設定仍然尊重：**第一次打開**時若系統要求減少動態，預設就是「關」。
+type Motion = "on" | "off";
 const MOTION_KEY = "costscale-bigscreen-motion";
 
 /**
@@ -227,11 +230,10 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
   const charts = useRef<Record<string, echarts.ECharts>>({});
   const [clock, setClock] = useState("--:--:--");
   const [dateLabel, setDateLabel] = useState("");
-  const [motion, setMotion] = useState<Motion>("system");
+  const [motion, setMotion] = useState<Motion>("on");
   const [skin, setSkin] = useState<Skin>(initialSkin ?? "cyber");
-  const [sysReduce, setSysReduce] = useState(false);
   const [isFull, setIsFull] = useState(false);
-  const still = motion === "off" || (motion === "system" && sysReduce);
+  const still = motion === "off";
   const FX = data.fx.rate;
   const P = SKINS[skin];
   const C = P.C;
@@ -257,6 +259,8 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
     try {
       const saved = localStorage.getItem(MOTION_KEY);
       if (saved === "on" || saved === "off") setMotion(saved);
+      // 沒選過的話看系統：要求減少動態就預設關
+      else if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setMotion("off");
       // 網址指定了風格（?skin=nerv，伺服器端已經套用）就記住它；沒指定才用上次記的。
       if (initialSkin) {
         localStorage.setItem(SKIN_KEY, initialSkin);
@@ -265,13 +269,9 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
         if (sk === "cyber" || sk === "nerv") setSkin(sk);
       }
     } catch { /* 無痕視窗讀不到就用預設 */ }
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setSysReduce(mq.matches);
-    const onMq = (e: MediaQueryListEvent) => setSysReduce(e.matches);
-    mq.addEventListener("change", onMq);
     const onFs = () => setIsFull(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", onFs);
-    return () => { mq.removeEventListener("change", onMq); document.removeEventListener("fullscreenchange", onFs); };
+    return () => { document.removeEventListener("fullscreenchange", onFs); };
   }, []);
   /** 按一下換下一種外觀。頁首的「切換到大屏」也是同一套輪流（components/BigScreenLink.tsx）。 */
   const cycleSkin = () => {
@@ -290,7 +290,7 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
 
   const chooseMotion = (m: Motion) => {
     setMotion(m);
-    try { if (m === "system") localStorage.removeItem(MOTION_KEY); else localStorage.setItem(MOTION_KEY, m); } catch { /* 忽略 */ }
+    try { localStorage.setItem(MOTION_KEY, m); } catch { /* 無痕視窗寫不進去就算了 */ }
   };
 
   // ── 時鐘與自動更新 ──
@@ -529,9 +529,9 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
               <button type="button" className="bs-btn bs-skin" onClick={cycleSkin} title="按一下換下一種大屏風格">風格 · {SKIN_NAME[skin]}</button>
               <span className="bs-seg" role="group" aria-label="動態效果">
                 <span className="bs-seg-lab">動態</span>
-                {(["system", "on", "off"] as Motion[]).map((m) => (
+                {(["on", "off"] as Motion[]).map((m) => (
                   <button key={m} type="button" aria-pressed={motion === m} onClick={() => chooseMotion(m)}>
-                    {m === "system" ? `跟隨系統${sysReduce ? "（關）" : "（開）"}` : m === "on" ? "開" : "關"}
+                    {m === "on" ? "開" : "關"}
                   </button>
                 ))}
               </span>
