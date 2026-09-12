@@ -686,6 +686,9 @@
 /* 圖例讓開人物 */
 .bs-cmd .bs-topo .bs-legend { left: 132px; }
 
+/* 拓撲右下：在圖表後面，所以就算碰到右側的模型標籤，文字也是畫在它上面 */
+.bs-cmd .bs-fig-topo-r { right: 0; bottom: 6px; height: 34%; opacity: 0.55; }
+
 .bs-cmd .bs-fig-mix  { right: 6px;  bottom: 0; height: 96%; }
 .bs-cmd .bs-fig-free { right: -10px; bottom: -4px; height: 62%; opacity: 0.52; }
 .bs-cmd .bs-fig-hour { right: 8px;  bottom: 0; height: 94%; }

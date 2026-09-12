@@ -673,6 +673,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               {dc("nerv") ? <img className="bs-hubmark" src={dc("nerv")} alt="" aria-hidden="true" /> : null}
               {dc("secret") ? <img className="bs-topo-secret" src={dc("secret")} alt="" aria-hidden="true" /> : null}
               {dc("char") ? <img className="bs-figure bs-fig-topo" src={dc("char")} alt="" aria-hidden="true" /> : null}
+              {dc("char2") ? <img className="bs-figure bs-fig-back bs-fig-topo-r" src={dc("char2")} alt="" aria-hidden="true" /> : null}
               <div className="bs-floor" />
               <div className="bs-holo"><span className="d1" /><span className="d2" /><span className="d3" /></div>
               <div className="bs-beam" />
@@ -693,7 +694,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               <div className="bs-chart" ref={els.apps} />
             </Box>
             <Box idx={6} acc={A.save} decal={dc("plan")} title="訂閱省下多少" note="官方 API 價目換算" src="SRC · cli_session_usage">
-              {dc("char2") ? <img className="bs-figure bs-fig-back bs-fig-save" src={dc("char2")} alt="" aria-hidden="true" /> : null}
+              {dc("char5") ? <img className="bs-figure bs-fig-back bs-fig-save" src={dc("char5")} alt="" aria-hidden="true" /> : null}
               <div className="bs-save">
                 <div className="bs-big"><strong>NT${fmtInt(saved)}</strong><span>本月省下</span></div>
                 {data.savings.rows.filter((r) => !r.noData).map((r) => (
