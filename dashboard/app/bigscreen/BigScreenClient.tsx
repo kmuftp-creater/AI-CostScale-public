@@ -466,7 +466,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
     series.push({ type: "scatter", coordinateSystem: "cartesian2d", zlevel: 2, data: nodes });
     // 左右留白（gx）要**算出來**，不能寫死：
     //   1. 節點固定在 x=8/100，像素位置 = 0.08×容器寬 + 0.84×gx；標籤從節點往左展開。
-    //   2. 作戰指揮那一版的左下角有人物素材的通訊視窗，標籤不能越過它。
+    //   2. 作戰指揮那一版的左下角有人物素材，標籤不能越過它。
     //   3. 軟體名稱的長度是資料決定的——示範資料最長是 ops-manual，正式機是
     //      「xxx-fitting-room」，寫死的留白在正式機就會把名稱前幾個字切掉
     //      （2026-09-13 兩次都栽在這裡：先按示範資料調成 236，正式機照片一拍就露出來）。
@@ -474,7 +474,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
     const tw = (s: string) => [...s].reduce((n, c) => n + (c.charCodeAt(0) > 0x2e7f ? 13.5 : 7.4), 0);
     const topoW = els.topo.current?.clientWidth ?? 880;
     let reserve = 20; // 沒有通訊視窗時只留一點邊
-    const cbox = els.topo.current?.closest(".bs-topo")?.querySelector(".bs-charbox");
+    const cbox = els.topo.current?.closest(".bs-topo")?.querySelector(".bs-fig-topo");
     if (cbox && els.topo.current) {
       reserve = Math.max(reserve, cbox.getBoundingClientRect().right - els.topo.current.getBoundingClientRect().left + 12);
     }
@@ -564,11 +564,11 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               {/* 側邊直排字（字是我們自己的）＋上方各一個小標 */}
               <div className="bs-edge bs-edge-l" aria-hidden="true">
                 {dc("nervleaf") ? <img src={dc("nervleaf")} alt="" /> : null}
-                <span>監 視 中</span>
+                <span>監視中</span>
               </div>
               <div className="bs-edge bs-edge-r" aria-hidden="true">
                 {dc("secret2") ? <img src={dc("secret2")} alt="" /> : null}
-                <span>記 錄 中</span>
+                <span>記錄中</span>
               </div>
               {/* 失敗數是真的資料：有失敗才亮紅幅，沒有就顯示正常 */}
               <div className={`bs-alarm ${data.month.failed ? "on" : ""}`}>
@@ -636,9 +636,11 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               <div className="bs-chart" ref={els.daily} />
             </Box>
             <Box idx={1} acc={A.mix} decal={dc("eva01")} title="模型用量" note="本月 · 依呼叫次數" src="SRC · SpendLogs · model_group">
+              {dc("char3") ? <img className="bs-figure bs-fig-back bs-fig-mix" src={dc("char3")} alt="" aria-hidden="true" /> : null}
               <div className="bs-chart" ref={els.mix} />
             </Box>
             <Box idx={2} acc={A.free} decal={dc("power")} title="免費額度" note="今日 · 台北 00:00 起" src="SRC · quota_pools × 金鑰盤點">
+              {dc("pen") ? <img className="bs-figure bs-fig-back bs-fig-free" src={dc("pen")} alt="" aria-hidden="true" /> : null}
               <div className="bs-chart" ref={els.free} />
               {poolManual ? <span className="bs-warn-chip">讀不到閘道設定，{poolManual.name} 暫用手填的 {poolManual.keys} 把</span> : null}
             </Box>
@@ -670,12 +672,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               {/* 私有素材：中央徽章、右上角小標、左下人物剪影 */}
               {dc("nerv") ? <img className="bs-hubmark" src={dc("nerv")} alt="" aria-hidden="true" /> : null}
               {dc("secret") ? <img className="bs-topo-secret" src={dc("secret")} alt="" aria-hidden="true" /> : null}
-              {dc("char") ? (
-                <div className="bs-charbox" aria-hidden="true">
-                  <span className="bs-charbox-bar" />
-                  <img src={dc("char")} alt="" />
-                </div>
-              ) : null}
+              {dc("char") ? <img className="bs-figure bs-fig-topo" src={dc("char")} alt="" aria-hidden="true" /> : null}
               <div className="bs-floor" />
               <div className="bs-holo"><span className="d1" /><span className="d2" /><span className="d3" /></div>
               <div className="bs-beam" />
@@ -686,6 +683,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
             </Box>
 
             <Box idx={4} acc={A.hour} decal={dc("eva00")} title="近 24 小時每小時呼叫" note={`台北時間 · 截至 ${data.hourlyThrough}`} src="SRC · SpendLogs · 台北時區">
+              {dc("char4") ? <img className="bs-figure bs-fig-back bs-fig-hour" src={dc("char4")} alt="" aria-hidden="true" /> : null}
               <div className="bs-chart" ref={els.hour} />
             </Box>
           </div>
@@ -695,6 +693,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               <div className="bs-chart" ref={els.apps} />
             </Box>
             <Box idx={6} acc={A.save} decal={dc("plan")} title="訂閱省下多少" note="官方 API 價目換算" src="SRC · cli_session_usage">
+              {dc("char2") ? <img className="bs-figure bs-fig-back bs-fig-save" src={dc("char2")} alt="" aria-hidden="true" /> : null}
               <div className="bs-save">
                 <div className="bs-big"><strong>NT${fmtInt(saved)}</strong><span>本月省下</span></div>
                 {data.savings.rows.filter((r) => !r.noData).map((r) => (

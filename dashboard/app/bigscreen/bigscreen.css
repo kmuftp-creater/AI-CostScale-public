@@ -569,10 +569,13 @@
 .bs-cmd .bs-digits s { color: #ffffff; }
 
 /* 側邊直排字：純造型，字是我們自己的 */
+/* 側邊直排字。
+   注意：**容器不能吃 writing-mode: vertical-rl**——直排模式下 flex 的 column 軸是水平的，
+   小標與直排字會被排成左右並列，一邊的小標壓到面板、另一邊的字壓到面板
+   （2026-09-13 User：「左右兩側你是故意設計的，還是跑版？」）。直排只給裡面的 span。 */
 .bs-cmd .bs-edge {
   position: absolute; top: 120px; z-index: 5; pointer-events: none;
-  writing-mode: vertical-rl; text-orientation: upright;
-  font: 900 20px var(--bs-body); letter-spacing: 0.4em;
+  font: 900 20px var(--bs-body);
   color: rgba(255, 255, 255, 0.32);
 }
 .bs-cmd .bs-edge-l { left: 4px; }
@@ -640,9 +643,9 @@
 .bs-cmd .bs-ct-decal { position: absolute; right: 10px; top: 36px; height: 17px; width: auto; opacity: 0.5; }
 
 /* 側邊直排字：上面各掛一個小標 */
-.bs-cmd .bs-edge { display: flex; flex-direction: column; align-items: center; gap: 14px; top: 104px; }
-.bs-cmd .bs-edge img { width: 26px; height: auto; opacity: 0.75; writing-mode: horizontal-tb; }
-.bs-cmd .bs-edge span { writing-mode: vertical-rl; text-orientation: upright; }
+.bs-cmd .bs-edge { display: flex; flex-direction: column; align-items: center; gap: 12px; top: 104px; width: 28px; }
+.bs-cmd .bs-edge img { width: 26px; height: auto; opacity: 0.75; }
+.bs-cmd .bs-edge span { writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.34em; }
 
 /* 警戒橫幅：左右各一個小標，中間是文字 */
 .bs-cmd .bs-alarm { gap: 14px; }
@@ -660,25 +663,38 @@
    為什麼不去背：量過原圖（2026-09-13）——頭髮亮部的藍優勢中位數 36、最大 85，
    背景是 50～151，兩者重疊，顏色門檻一定會吃到頭髮；邊界填色法則會爬進白色戰鬥服。
    保留原背景、加一個框，看起來就是刻意的畫面元件，而不是去背失敗。 */
-.bs-cmd .bs-charbox {
-  /* 寬度 110：拓撲的左側留白是照「這個框的右緣 ＋ 最長的軟體名稱」算出來的
-     （BigScreenClient.tsx 的 gx），框再寬就會把節點推進中央的投影圈裡。 */
-  position: absolute; left: 8px; bottom: 26px; width: 110px; z-index: 2;
-  border: 2px solid rgba(255, 255, 255, 0.7); background: #0b0805; overflow: hidden;
-  box-shadow: 0 0 0 1px rgba(255, 106, 0, 0.45);
+/* ══ 人物素材 ══
+   原則：**一律不蓋到數字**。
+   - 放在面板角落的（拓撲左下）走 .bs-figure，在圖表上方，但位置是空白角落，
+     而且拓撲的左側留白是照「這張圖的右緣 ＋ 最長的軟體名稱」算出來的（BigScreenClient.tsx 的 gx）。
+   - 放在面板裡面的（模型用量、免費額度、近 24 小時、訂閱省下多少）走 .bs-fig-back：
+     z-index 0＝在圖表與文字後面，透明度壓到 0.3 上下，只當氣氛。
+   素材一律「有檔才出現」，公開版一個都沒有，版面照樣完整。 */
+.bs-cmd .bs-figure { position: absolute; z-index: 2; pointer-events: none; }
+.bs-cmd .bs-fig-back {
+  z-index: 0; opacity: 0.3;
+  -webkit-mask-image: linear-gradient(to top, transparent, #000 22%);
+  mask-image: linear-gradient(to top, transparent, #000 22%);
 }
-/* 圖例讓開通訊視窗 */
-.bs-cmd .bs-topo .bs-legend { left: 130px; }
-.bs-cmd .bs-charbox-bar {
-  display: block; height: 8px;
-  background: repeating-linear-gradient(45deg, #ff6a00 0 10px, #0b0805 10px 20px);
-}
-.bs-cmd .bs-charbox img { display: block; width: 100%; height: auto; opacity: 0.92; }
 
-/* 每日閘道花費：機體圖（背景複雜，所以壓透明度＋漸層遮罩，只當氣氛） */
+/* 拓撲左下的人物：底部淡出（原圖下緣是裁掉的，淡出才看不出來） */
+.bs-cmd .bs-fig-topo {
+  left: 2px; bottom: 14px; width: 116px; opacity: 0.95;
+  -webkit-mask-image: linear-gradient(to top, transparent, #000 18%);
+  mask-image: linear-gradient(to top, transparent, #000 18%);
+}
+/* 圖例讓開人物 */
+.bs-cmd .bs-topo .bs-legend { left: 132px; }
+
+.bs-cmd .bs-fig-mix  { right: 6px;  bottom: 0; height: 96%; }
+.bs-cmd .bs-fig-free { right: -10px; bottom: -4px; height: 62%; opacity: 0.52; }
+.bs-cmd .bs-fig-hour { right: 8px;  bottom: 0; height: 94%; }
+.bs-cmd .bs-fig-save { right: 4px;  bottom: 0; height: 62%; opacity: 0.38; }
+
+/* 每日閘道花費：機體圖（已去背，所以透明度可以拉高一點；左側漸層遮罩讓它不跟折線打架） */
 .bs-cmd .bs-unitmark {
-  position: absolute; right: -6px; bottom: -8px; height: 92%; width: auto; z-index: 0;
-  opacity: 0.3; pointer-events: none;
+  position: absolute; right: -4px; bottom: 0; height: 88%; width: auto; z-index: 0;
+  opacity: 0.36; pointer-events: none;
   -webkit-mask-image: linear-gradient(to left, #000 0 30%, transparent 88%);
   mask-image: linear-gradient(to left, #000 0 30%, transparent 88%);
 }
