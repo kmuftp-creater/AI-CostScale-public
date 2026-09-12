@@ -403,8 +403,11 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
           rich: { n: { fontSize: 13.5 }, c: { fontFamily: numFont, fontSize: 12, color: a.calls ? tint(ac, 0.35) : C.muted } } } });
       if (a.calls) series.push({ type: "lines", coordinateSystem: "cartesian2d", zlevel: 1,
         lineStyle: { curveness: P.flat ? 0 : 0.18, opacity: P.flat ? 0.95 : 0.8, width: w(a.calls), color: P.flat ? ac : new G(0, 0, 1, 0, [{ offset: 0, color: ac }, { offset: 1, color: P.hub }]) },
+        // 扁平外觀不用 ECharts 的 lines effect：它在 SVG 渲染下不是畫一顆小方塊，
+        // 而是沿線畫出一整段實色線，與 CSS 的流動虛線疊在一起，看起來像每條線都多一條黃線
+        // （2026-09-12 User：「流量拓撲長得不一樣」）。扁平外觀的流動改由 CSS 虛線負責。
         effect: P.flat
-          ? { show: !still, period: 2.2, trailLength: 0, symbol: "rect", symbolSize: 9, color: "#ffcc00" }
+          ? { show: false }
           : { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: tint(ac, 0.55) },
         data: [{ coords: [p, hub], value: a.calls, name: a.name }] });
     });
@@ -422,7 +425,7 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
     });
     series.push({ type: "lines", coordinateSystem: "cartesian2d", zlevel: 1, lineStyle: { curveness: P.flat ? 0 : 0.18, opacity: P.flat ? 0.9 : 0.7 },
       effect: P.flat
-        ? { show: !still, period: 2.6, trailLength: 0, symbol: "rect", symbolSize: 9, color: "#ffe9c7" }
+        ? { show: false }
         : { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: P.line }, data: mLines });
     series.push({ type: "scatter", coordinateSystem: "cartesian2d", zlevel: 2, data: nodes });
     init("topo")?.setOption({

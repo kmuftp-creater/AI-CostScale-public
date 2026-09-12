@@ -508,6 +508,8 @@
    比對雜湊，不同就是真的在動。實測 39B7A844 vs A58EA613，確認會動。 */
 @keyframes bs-nv-dash { to { stroke-dashoffset: -44; } }
 .bs-nerv .bs-topo .bs-chart svg path[fill="none"] {
+  /* 缺口大、像封包一格一格在跑（2026-09-13 User 指定用這一版；
+     我一度自己改成大段實心的密虛線，那是誤讀 User 的意思）。 */
   stroke-dasharray: 16 28;
   animation: bs-nv-dash 1.15s linear infinite;
 }
