@@ -56,4 +56,5 @@ dashboard/public/private/*
 !dashboard/public/private/secret2.png
 !dashboard/public/private/agency.png
 !dashboard/public/private/power.png
+!dashboard/public/private/urgent.png
 !dashboard/public/private/THIRD-PARTY-NOTICE.md
