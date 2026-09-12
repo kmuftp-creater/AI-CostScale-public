@@ -464,3 +464,13 @@
 .bs-nerv .bs-events .sv.crit { background: var(--nv-red); }
 .bs-nerv .bs-events li { color: var(--bs-ink); }
 .bs-nerv .bs-warn-chip { color: var(--nv-red); border-color: var(--nv-red); background: rgba(255, 31, 15, 0.10); }
+
+/* 徽章第二版（2026-09-12）：外圈刻度、放射葉脈、半透明重疊六角、紅核心。
+   造型往「機構徽章」的氣質靠，字樣仍是我們自己的——不使用任何作品的標誌或名稱。 */
+.bs-nerv .bs-emblem svg { width: 74px; height: 74px; }
+.bs-nerv .bs-emblem .tick line { stroke: var(--nv); stroke-width: 2.4; opacity: 0.55; }
+.bs-nerv .bs-emblem .hex2 { fill: rgba(255, 106, 0, 0.07); stroke: var(--nv); stroke-width: 1.5; opacity: 0.55; }
+.bs-nerv .bs-emblem .vein line, .bs-nerv .bs-emblem .vein path { stroke: var(--nv); stroke-width: 1.4; opacity: 0.5; fill: none; }
+.bs-nerv .bs-emblem b { border-bottom: 2px solid var(--nv-red); padding-bottom: 3px; }
+.bs-nerv .bs-sub-l { left: 292px; }
+.bs-nerv .bs-tools-l { left: 292px; }

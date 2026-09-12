@@ -143,17 +143,35 @@ function SevenSeg({ ch }: { ch: string }) {
  * 六角形＋三節點是很常見的圖解造型（三個節點對應這套系統的三段：軟體 → 閘道 → 模型）。
  */
 function Emblem() {
+  // 外圈刻度：24 格，用算的不要手寫 24 條線
+  const ticks = Array.from({ length: 24 }, (_, i) => {
+    const a = (i * Math.PI * 2) / 24 - Math.PI / 2;
+    const r1 = i % 6 === 0 ? 54 : 60;
+    return { x1: 70 + Math.cos(a) * r1, y1: 70 + Math.sin(a) * r1, x2: 70 + Math.cos(a) * 66, y2: 70 + Math.sin(a) * 66 };
+  });
+  // 放射葉脈：從下方一點扇形展開到上緣，像徽章上那種線條
+  const veins = [
+    [44, 46], [52, 41], [60, 38], [70, 36], [80, 38], [88, 41], [96, 46],
+  ];
   return (
     <div className="bs-emblem">
-      <svg viewBox="0 0 120 120" aria-hidden="true">
-        <polygon className="hex" points="60,3 111,33 111,87 60,117 9,87 9,33" />
-        <polygon className="tri" points="60,34 86,79 34,79" />
-        <g className="node">
-          <circle cx="60" cy="34" r="7" />
-          <circle cx="86" cy="79" r="7" />
-          <circle cx="34" cy="79" r="7" />
+      <svg viewBox="0 0 140 140" aria-hidden="true">
+        <g className="tick">
+          {ticks.map((t, i) => <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} />)}
         </g>
-        <circle className="core" cx="60" cy="64" r="4" />
+        <polygon className="hex2" points="70,8 123,39 123,101 70,132 17,101 17,39" />
+        <polygon className="hex" points="70,18 115,44 115,96 70,122 25,96 25,44" />
+        <g className="vein">
+          {veins.map(([x, y], i) => <line key={i} x1={70} y1={104} x2={x} y2={y} />)}
+          <path d="M44 46 Q70 30 96 46" />
+        </g>
+        <polygon className="tri" points="70,44 96,92 44,92" />
+        <g className="node">
+          <circle cx="70" cy="44" r="7" />
+          <circle cx="96" cy="92" r="7" />
+          <circle cx="44" cy="92" r="7" />
+        </g>
+        <circle className="core" cx="70" cy="76" r="4.5" />
       </svg>
       <span><b>閘道管制</b><i>GATEWAY CONTROL</i></span>
     </div>
