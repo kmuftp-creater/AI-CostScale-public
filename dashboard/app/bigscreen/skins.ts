@@ -37,7 +37,9 @@ export const SKIN_CLASS: Record<Skin, string[]> = {
 export const ASSET_SLOTS = [
   "logo",      // 頁首左上的標誌
   "mark",      // 整個舞台的背景圖（壓很淡）
-  "char",      // 拓撲面板左下的人物剪影
+  "char",      // 拓撲面板左下的人物（放在有邊框的通訊視窗裡）
+  "daily",     // 每日閘道花費面板的機體圖
+  "urgent",    // 有失敗時，警戒橫幅左端換成這個
   "nerv",      // 拓撲中央「閘道」後面的徽章
   "nervleaf",  // 左側直排字上方的小標
   "secret2",   // 右側直排字上方的小標

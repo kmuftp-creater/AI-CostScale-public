@@ -464,9 +464,25 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
         ? { show: false }
         : { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: P.line }, data: mLines });
     series.push({ type: "scatter", coordinateSystem: "cartesian2d", zlevel: 2, data: nodes });
+    // 左右留白（gx）要**算出來**，不能寫死：
+    //   1. 節點固定在 x=8/100，像素位置 = 0.08×容器寬 + 0.84×gx；標籤從節點往左展開。
+    //   2. 作戰指揮那一版的左下角有人物素材的通訊視窗，標籤不能越過它。
+    //   3. 軟體名稱的長度是資料決定的——示範資料最長是 ops-manual，正式機是
+    //      「xxx-fitting-room」，寫死的留白在正式機就會把名稱前幾個字切掉
+    //      （2026-09-13 兩次都栽在這裡：先按示範資料調成 236，正式機照片一拍就露出來）。
+    // 左右必須一樣大，閘道（50,50）才會落在正中央、跟 CSS 的投影台對齊。
+    const tw = (s: string) => [...s].reduce((n, c) => n + (c.charCodeAt(0) > 0x2e7f ? 13.5 : 7.4), 0);
+    const topoW = els.topo.current?.clientWidth ?? 880;
+    let reserve = 20; // 沒有通訊視窗時只留一點邊
+    const cbox = els.topo.current?.closest(".bs-topo")?.querySelector(".bs-charbox");
+    if (cbox && els.topo.current) {
+      reserve = Math.max(reserve, cbox.getBoundingClientRect().right - els.topo.current.getBoundingClientRect().left + 12);
+    }
+    const labelW = Math.max(0, ...leftApps.map((a) => tw(`${a.name}  ${a.calls ? fmtInt(a.calls) : "閒置"}`)));
+    // 上限 292：再大就把節點推進中央的投影圈裡了
+    const gx = Math.round(Math.min(292, Math.max(190, (reserve + labelW + 18 - 0.08 * topoW) / 0.84)));
     init("topo")?.setOption({
-      // 上下、左右都對稱：閘道（座標 50,50）才會落在容器正中央，跟 CSS 的投影台對齊
-      grid: { left: 190, right: 190, top: 34, bottom: 34 },
+      grid: { left: gx, right: gx, top: 34, bottom: 34 },
       xAxis: { type: "value", min: 0, max: 100, show: false }, yAxis: { type: "value", min: 0, max: 100, show: false },
       tooltip: { ...TIP, trigger: "item", formatter: (p: { seriesType: string; name: string; data: { name: string; value: number } }) =>
         p.seriesType === "lines" ? `${p.data.name}<br/><b>${fmtInt(p.data.value)} 次</b>` : p.name },
@@ -556,7 +572,9 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               </div>
               {/* 失敗數是真的資料：有失敗才亮紅幅，沒有就顯示正常 */}
               <div className={`bs-alarm ${data.month.failed ? "on" : ""}`}>
-                {dc("alarm") ? <img src={dc("alarm")} alt="" aria-hidden="true" /> : null}
+                {((data.month.failed && dc("urgent")) || dc("alarm"))
+                  ? <img src={(data.month.failed && dc("urgent")) || dc("alarm")} alt="" aria-hidden="true" />
+                  : null}
                 <b>{data.month.failed
                   ? `本月偵測到 ${fmtInt(data.month.failed)} 筆失敗請求`
                   : "本月無失敗請求"}</b>
@@ -614,6 +632,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
 
           <div className="bs-col bs-left">
             <Box idx={0} acc={A.daily} decal={dc("internal")} title="每日閘道花費" note="近 30 天 · 台北日 · 美元" src="SRC · SpendLogs · 日">
+              {dc("daily") ? <img className="bs-unitmark" src={dc("daily")} alt="" aria-hidden="true" /> : null}
               <div className="bs-chart" ref={els.daily} />
             </Box>
             <Box idx={1} acc={A.mix} decal={dc("eva01")} title="模型用量" note="本月 · 依呼叫次數" src="SRC · SpendLogs · model_group">
@@ -651,7 +670,12 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               {/* 私有素材：中央徽章、右上角小標、左下人物剪影 */}
               {dc("nerv") ? <img className="bs-hubmark" src={dc("nerv")} alt="" aria-hidden="true" /> : null}
               {dc("secret") ? <img className="bs-topo-secret" src={dc("secret")} alt="" aria-hidden="true" /> : null}
-              {dc("char") ? <img className="bs-char" src={dc("char")} alt="" aria-hidden="true" /> : null}
+              {dc("char") ? (
+                <div className="bs-charbox" aria-hidden="true">
+                  <span className="bs-charbox-bar" />
+                  <img src={dc("char")} alt="" />
+                </div>
+              ) : null}
               <div className="bs-floor" />
               <div className="bs-holo"><span className="d1" /><span className="d2" /><span className="d3" /></div>
               <div className="bs-beam" />
