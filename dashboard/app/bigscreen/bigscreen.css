@@ -242,3 +242,105 @@
 
 /* 翻牌數字的三個框不跑邊框流光：框太扁，光轉到短邊時會一下跳過去，看起來像在閃（2026-09-12 User 回報）。 */
 .bs-counter::after { display: none; }
+
+/* ══ 外觀二：黑橘警戒（2026-09-12，User 要「新世紀福音戰士」那種感覺）══
+   取的是那種指揮所的視覺語言——黑底、橘色警戒條、稜角切邊、綠色終端字。
+   **不使用作品裡的標誌、名稱或任何美術資產**，只有配色與造型語彙。
+   版面、元件、資料完全共用第一種外觀，這裡只換 CSS 變數與少數造型。 */
+.bs-nerv {
+  --bs-bg: #08060a;
+  --bs-bg-2: #1a0f05;
+  --bs-panel: rgba(30, 17, 6, 0.55);
+  --bs-frame: rgba(255, 122, 24, 0.45);
+  --bs-cy: #ff7a18;
+  --bs-ink: #f3ecdc;
+  --bs-ink-2: #cbbfa5;
+  --bs-muted: #8d836e;
+  --bs-good: #7ee787;
+  --bs-warn: #ffcc00;
+  --bs-crit: #ff3b30;
+}
+
+/* 舞台：拿掉藍紫星雲，改成黑底＋橘色掃描線與網格 */
+.bs-nerv .bs-stage {
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 122, 24, 0.045) 0 1px, transparent 1px 4px),
+    radial-gradient(ellipse 46% 42% at 50% 52%, rgba(255, 122, 24, 0.20), transparent 70%),
+    radial-gradient(ellipse 30% 30% at 14% 78%, rgba(255, 204, 0, 0.10), transparent 70%),
+    radial-gradient(ellipse 30% 28% at 84% 72%, rgba(126, 231, 135, 0.08), transparent 70%),
+    linear-gradient(rgba(255, 122, 24, 0.06) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(90deg, rgba(255, 122, 24, 0.06) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(180deg, var(--bs-bg-2), var(--bs-bg) 55%);
+}
+/* 掃描光改橘 */
+.bs-nerv .bs-stage::after {
+  background: linear-gradient(180deg, transparent, rgba(255, 122, 24, 0.06) 60%, rgba(255, 200, 140, 0.20) 97%, transparent);
+}
+/* 底部警戒條紋：整個畫面最像「那種指揮所」的一筆 */
+.bs-nerv .bs-stage::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 12px; z-index: 6; pointer-events: none;
+  background: repeating-linear-gradient(45deg, #ff7a18 0 16px, #0a0705 16px 32px);
+  opacity: 0.55;
+}
+
+/* 標題：不要漸層填字，改成實心橘＋外光 */
+.bs-nerv .bs-head h1 {
+  background: none; color: #ff7a18; -webkit-text-fill-color: #ff7a18;
+  letter-spacing: 0.30em; font-weight: 900;
+  filter: drop-shadow(0 0 14px rgba(255, 122, 24, 0.55));
+}
+.bs-nerv .bs-clock { color: #7ee787; text-shadow: 0 0 10px rgba(126, 231, 135, 0.55); }
+
+/* 面板：右下切角，邊框橘色，標題字距拉開 */
+.bs-nerv .bs-box {
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%);
+  box-shadow: inset 0 0 40px rgba(255, 122, 24, 0.10);
+}
+.bs-nerv .bs-bt { border-bottom-color: color-mix(in srgb, var(--acc) 55%, transparent); }
+.bs-nerv .bs-bt span { letter-spacing: 0.18em; }
+.bs-nerv .bs-hud { color: #7ee787; }
+.bs-nerv .bs-ticks { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--acc) 80%, transparent) 0 5px, transparent 5px 10px); }
+/* 切角會把右下角的角標切掉，補一條橘線回去 */
+.bs-nerv .bs-box::before {
+  content: ""; position: absolute; right: -1px; bottom: -1px; width: 24px; height: 24px; z-index: 3; pointer-events: none;
+  background: linear-gradient(45deg, var(--acc) 0 2px, transparent 2px);
+}
+
+/* 拓撲的投影台：藍紫改橘綠 */
+.bs-nerv .bs-floor {
+  background:
+    linear-gradient(rgba(255, 122, 24, 0.45) 1px, transparent 1px) 0 0 / 100% 38px,
+    linear-gradient(90deg, rgba(126, 231, 135, 0.22) 1px, transparent 1px) 0 0 / 46px 100%;
+}
+.bs-nerv .bs-holo .d1 { background: repeating-conic-gradient(rgba(255, 122, 24, 0.85) 0 1.2deg, transparent 1.2deg 10deg); }
+.bs-nerv .bs-holo .d2 {
+  border-top-color: #ff7a18; border-right-color: #ffcc00; border-bottom-color: rgba(126, 231, 135, 0.9);
+  box-shadow: 0 0 22px rgba(255, 122, 24, 0.45);
+}
+.bs-nerv .bs-holo .d3 { background: radial-gradient(circle, rgba(255, 122, 24, 0.5), rgba(255, 204, 0, 0.10) 60%, transparent 70%); }
+.bs-nerv .bs-beam { background: linear-gradient(to top, rgba(255, 122, 24, 0.5), rgba(255, 122, 24, 0)); }
+.bs-nerv .bs-core { background: radial-gradient(circle, rgba(255, 122, 24, 0.42), rgba(255, 204, 0, 0.08) 60%, transparent 70%); }
+.bs-nerv .bs-hub b { text-shadow: 0 0 14px rgba(255, 122, 24, 0.95); }
+.bs-nerv .bs-hub small { color: #ffcc00; }
+
+/* 訂閱省下多少 */
+.bs-nerv .bs-big strong {
+  background: linear-gradient(90deg, #ff7a18, #ffcc00);
+  filter: drop-shadow(0 0 10px rgba(255, 122, 24, 0.45));
+}
+.bs-nerv .bs-srow .tr { background: rgba(255, 122, 24, 0.12); border-color: rgba(255, 122, 24, 0.30); }
+.bs-nerv .bs-srow .tr.api i { background: linear-gradient(90deg, #7ee787, #ffcc00); box-shadow: 0 0 8px rgba(126, 231, 135, 0.5); }
+.bs-nerv .bs-srow .tr.fee i { background: #ff7a18; }
+.bs-nerv .bs-srow .v.fee { color: #ff7a18; }
+
+/* 最近異常 */
+.bs-nerv .bs-events li { border-bottom-color: rgba(255, 122, 24, 0.25); }
+.bs-nerv .bs-events time { color: #7ee787; }
+
+/* 頁首的按鈕與切換 */
+.bs-nerv .bs-seg { border-color: rgba(255, 122, 24, 0.6); background: rgba(30, 17, 6, 0.6); }
+.bs-nerv .bs-seg button + button { border-left-color: rgba(255, 122, 24, 0.4); }
+.bs-nerv .bs-seg button[aria-pressed="true"] { background: rgba(255, 122, 24, 0.20); color: #ff7a18; }
+.bs-nerv .bs-btn { border-color: rgba(255, 122, 24, 0.6); background: rgba(30, 17, 6, 0.6); }
+/* 風格鈕：兩種外觀都看得出它是「會換東西」的那顆 */
+.bs-skin { letter-spacing: 0.06em; }

@@ -3,7 +3,7 @@ import Image from "next/image";
 import { signOut } from "@/auth";
 import NavRail from "./NavRail";
 import ThemeToggle from "./ThemeToggle";
-import Link from "next/link";
+import BigScreenLink from "./BigScreenLink";
 import DateRangeSeg from "./DateRangeSeg";
 import BudgetBanner from "./BudgetBanner";
 import ReminderBanner from "./ReminderBanner";
@@ -42,8 +42,9 @@ export default function AppShell({
             <Suspense fallback={null}>
               <DateRangeSeg />
             </Suspense>
-            {/* 大屏在儀表板外框之外，按「返回儀表板」之後要能再回去（2026-09-12 User 回報） */}
-            <Link className="btn-ghost" href="/bigscreen" title="切換到全畫面的營運大屏">切換到大屏</Link>
+            {/* 大屏在儀表板外框之外，按「返回儀表板」之後要能再回去（2026-09-12 User 回報）。
+                按一下換下一種大屏風格，所以是按鈕不是連結，見 BigScreenLink.tsx。 */}
+            <BigScreenLink />
             <ThemeToggle />
             <div className="who">
               <div className="avatar" title={userEmail ?? "開發模式"}>

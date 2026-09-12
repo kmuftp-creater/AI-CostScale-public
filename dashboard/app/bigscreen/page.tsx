@@ -20,14 +20,20 @@ const orbitron = Orbitron({
   display: "swap",
 });
 
-export default async function BigScreenPage() {
+/**
+ * 網址可以指定外觀：/bigscreen?skin=nerv。沒指定時交給瀏覽器記住的那一個（在 BigScreenClient）。
+ * 伺服器端就把 class 加上去，切換時才不會先閃一下另一種配色，無頭瀏覽器截圖也才拍得到指定的那一種。
+ */
+export default async function BigScreenPage({ searchParams }: { searchParams: Promise<{ skin?: string }> }) {
+  const sp = await searchParams;
+  const urlSkin = sp.skin === "nerv" || sp.skin === "cyber" ? sp.skin : null;
   const data = await getBigScreenData();
   return (
-    <div className={`bs ${orbitron.variable}`}>
+    <div className={`bs ${urlSkin === "nerv" ? "bs-nerv" : ""} ${orbitron.variable}`}>
       {/* 把 next/font 產生的真實字型名稱傳下去給 ECharts。ECharts 量字寬用 canvas，
           看不懂 CSS 變數；傳 var(--font-orbitron) 的話它會用預設字型去量，
           實際畫出來的 Orbitron 比較寬，相鄰文字就疊在一起（2026-09-12 排行的金額）。 */}
-      <BigScreenClient data={data} numFont={`${orbitron.style.fontFamily}, monospace`} />
+      <BigScreenClient data={data} numFont={`${orbitron.style.fontFamily}, monospace`} initialSkin={urlSkin} />
     </div>
   );
 }

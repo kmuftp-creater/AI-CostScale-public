@@ -12,8 +12,6 @@ const NAV_ITEMS = [
   { href: "/budgets", label: "預算告警" },
   { href: "/channels", label: "通道與用量" },
   { href: "/billing", label: "GCP 帳單" },
-  // 營運大屏在 (app) 群組之外、沒有導覽列；頁首有「返回儀表板」
-  { href: "/bigscreen", label: "大屏" },
   { href: "/settings", label: "設定" },
   { href: "/manual", label: "說明" },
 ] as const;

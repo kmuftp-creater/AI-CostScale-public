@@ -23,15 +23,76 @@ echarts.use([LineChart, PieChart, GaugeChart, BarChart, LinesChart, ScatterChart
  *   看久了沒有科幻的感覺」——8/19 否決紫色的是儀表板，大屏這裡改回藍紫。色階用 dataviz 驗證器跑過 ordinal 檢查。
  */
 
-const MODEL_RAMP = ["#e8e2ff", "#bfb0ff", "#9a85ff", "#735ae8"];
-const VIOLET = "#9a85ff";
-const FAIL = "#c2414f";
-const GRAY = "#56699a";
-const C = { cy: "#22d3ee", good: "#2ee6a6", warn: "#ffb72b", crit: "#ff4d5e", ink: "#e2f1ff", ink2: "#a3c0ea", muted: "#6484b8", grid: "rgba(47,123,255,0.18)" };
-const TIP = { backgroundColor: "rgba(4,20,60,0.94)", borderColor: "#1f6ad8", borderWidth: 1, textStyle: { color: C.ink, fontSize: 13 } };
 const G = echarts.graphic.LinearGradient;
 type Motion = "system" | "on" | "off";
 const MOTION_KEY = "costscale-bigscreen-motion";
+
+/**
+ * 兩套外觀，頁首「風格」按一下換下一種，選擇存在這台電腦（2026-09-12 User 要求）。
+ *
+ * nerv 取的是《新世紀福音戰士》指揮所那種視覺語言——黑底、橘色警戒條、稜角切邊、
+ * 綠色終端字。**刻意不使用作品裡的標誌、名稱或任何美術資產**，只有配色與造型語彙。
+ *
+ * 兩套的軟體類別色與模型色階都用 dataviz 的驗證器跑過（深色底，類別與 ordinal 兩種模式）：
+ * nerv 的第一版橘／琥珀／紅彼此只差 ΔE 3，色盲與一般視力都分不出來，退回現在這組才全過。
+ */
+export type Skin = "cyber" | "nerv";
+export const SKIN_KEY = "costscale-bigscreen-skin";
+export const SKIN_ORDER: Skin[] = ["cyber", "nerv"];
+export const SKIN_NAME: Record<Skin, string> = { cyber: "藍紫科幻", nerv: "黑橘警戒" };
+/** 伺服器端配色（lib/bigscreen.ts）給「不分配顏色」的軟體用的灰，換皮時要原樣保留灰。 */
+const SERVER_GRAY = "#56699a";
+
+const SKINS = {
+  cyber: {
+    ramp: ["#e8e2ff", "#bfb0ff", "#9a85ff", "#735ae8"],
+    hub: "#9a85ff",
+    fail: "#c2414f",
+    gray: SERVER_GRAY,
+    idle: "#3a4a72",
+    line: "#f1edff",
+    apps: null as string[] | null,
+    C: { cy: "#22d3ee", good: "#2ee6a6", warn: "#ffb72b", crit: "#ff4d5e", ink: "#e2f1ff", ink2: "#a3c0ea", muted: "#6484b8", grid: "rgba(47,123,255,0.18)" },
+    tip: { bg: "rgba(4,20,60,0.94)", border: "#1f6ad8" },
+    daily: ["#4b88fd", "#22d3ee", "#9a85ff"],
+    dailyGlow: "rgba(124,92,255,0.7)",
+    dailyArea: ["rgba(34,211,238,0.45)", "rgba(75,136,253,0.10)", "rgba(75,136,253,0)"],
+    hourBar: ["#7ff5c8", "#2ee6a6", "rgba(34,211,238,0.12)"],
+    hourPeak: ["#ffd66b", "rgba(255,154,61,0.2)"],
+    ring: "rgba(154,133,255,0.32)",
+    pieBorder: "#041a4a",
+    track: "rgba(47,123,255,0.13)",
+    gaugeTrack: "rgba(46,230,166,0.16)",
+    gaugeTick: "rgba(46,230,166,0.35)",
+    modelWord: "藍紫",
+    head: { g1: "#0b44b0", g2: "#041a55", edge: "#2a8cff", rail: "#1f6ad8", l1: "#22d3ee", l2: "#ffffff", l3: "#2ee6a6", flow: "#9ff6ff", chipA: "#22d3ee", chipB: "#ff9a3d", chipC: "#2ee6a6" },
+    acc: { daily: "#22d3ee", mix: "#bfb0ff", free: "#2ee6a6", calls: "#22d3ee", tokens: "#2ee6a6", spend: "#ff9a3d", topo: "#9a85ff", hour: "#2ee6a6", rank: "#ff9a3d", save: "#2ee6a6", events: "#ff6aa8" },
+  },
+  nerv: {
+    ramp: ["#ffd9a8", "#ffb056", "#f2801a", "#b85500"],
+    hub: "#f2801a",
+    fail: "#ff3b30",
+    gray: "#6f6a5c",
+    idle: "#43403a",
+    line: "#ffe9c7",
+    apps: ["#d4640c", "#0f9c84", "#bb8d16", "#cf4540", "#7d6ad9", "#7f9234"] as string[] | null,
+    C: { cy: "#ff7a18", good: "#7ee787", warn: "#ffcc00", crit: "#ff3b30", ink: "#f3ecdc", ink2: "#cbbfa5", muted: "#8d836e", grid: "rgba(255,122,24,0.16)" },
+    tip: { bg: "rgba(12,8,4,0.95)", border: "#ff7a18" },
+    daily: ["#b85500", "#ff7a18", "#ffcc00"],
+    dailyGlow: "rgba(255,122,24,0.55)",
+    dailyArea: ["rgba(255,122,24,0.40)", "rgba(255,122,24,0.10)", "rgba(255,122,24,0)"],
+    hourBar: ["#b6f0b6", "#7ee787", "rgba(126,231,135,0.10)"],
+    hourPeak: ["#ffcc00", "rgba(255,122,24,0.2)"],
+    ring: "rgba(255,122,24,0.30)",
+    pieBorder: "#120c06",
+    track: "rgba(255,122,24,0.12)",
+    gaugeTrack: "rgba(126,231,135,0.14)",
+    gaugeTick: "rgba(126,231,135,0.35)",
+    modelWord: "橘",
+    head: { g1: "#c24a00", g2: "#160a03", edge: "#ff7a18", rail: "#8a4a10", l1: "#ff7a18", l2: "#ffe9c7", l3: "#7ee787", flow: "#ffd9a8", chipA: "#ff7a18", chipB: "#ffcc00", chipC: "#7ee787" },
+    acc: { daily: "#ff7a18", mix: "#ffb056", free: "#7ee787", calls: "#ff7a18", tokens: "#7ee787", spend: "#ffcc00", topo: "#f2801a", hour: "#7ee787", rank: "#ffcc00", save: "#7ee787", events: "#ff3b30" },
+  },
+} as const;
 
 const tint = (hex: string, t: number) => {
   const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
@@ -76,7 +137,7 @@ function Box({ acc, title, note, src, idx, children, className = "" }: {
   );
 }
 
-export default function BigScreenClient({ data, numFont }: { data: BigScreenData; numFont: string }) {
+export default function BigScreenClient({ data, numFont, initialSkin }: { data: BigScreenData; numFont: string; initialSkin?: Skin | null }) {
   const router = useRouter();
   const vpRef = useRef<HTMLDivElement>(null);
   const stRef = useRef<HTMLDivElement>(null);
@@ -88,10 +149,15 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
   const [clock, setClock] = useState("--:--:--");
   const [dateLabel, setDateLabel] = useState("");
   const [motion, setMotion] = useState<Motion>("system");
+  const [skin, setSkin] = useState<Skin>(initialSkin ?? "cyber");
   const [sysReduce, setSysReduce] = useState(false);
   const [isFull, setIsFull] = useState(false);
   const still = motion === "off" || (motion === "system" && sysReduce);
   const FX = data.fx.rate;
+  const P = SKINS[skin];
+  const C = P.C;
+  const A = P.acc;
+  const TIP = { backgroundColor: P.tip.bg, borderColor: P.tip.border, borderWidth: 1, textStyle: { color: C.ink, fontSize: 13 } };
 
   // ── 縮放（最先做：頁面高度靠它）──
   useEffect(() => {
@@ -112,6 +178,13 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
     try {
       const saved = localStorage.getItem(MOTION_KEY);
       if (saved === "on" || saved === "off") setMotion(saved);
+      // 網址指定了風格（?skin=nerv，伺服器端已經套用）就記住它；沒指定才用上次記的。
+      if (initialSkin) {
+        localStorage.setItem(SKIN_KEY, initialSkin);
+      } else {
+        const sk = localStorage.getItem(SKIN_KEY);
+        if (sk === "cyber" || sk === "nerv") setSkin(sk);
+      }
     } catch { /* 無痕視窗讀不到就用預設 */ }
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     setSysReduce(mq.matches);
@@ -121,6 +194,21 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
     document.addEventListener("fullscreenchange", onFs);
     return () => { mq.removeEventListener("change", onMq); document.removeEventListener("fullscreenchange", onFs); };
   }, []);
+  /** 按一下換下一種外觀。頁首的「切換到大屏」也是同一套輪流（components/BigScreenLink.tsx）。 */
+  const cycleSkin = () => {
+    const next = SKIN_ORDER[(SKIN_ORDER.indexOf(skin) + 1) % SKIN_ORDER.length];
+    setSkin(next);
+    try { localStorage.setItem(SKIN_KEY, next); } catch { /* 無痕視窗寫不進去就算了 */ }
+  };
+
+  // CSS 變數定義在外層的 .bs（在 page.tsx，是伺服器元件，拿不到這裡的狀態），
+  // 所以外觀的 class 由這裡掛上去。
+  useEffect(() => {
+    const root = vpRef.current?.closest(".bs");
+    if (!root) return;
+    root.classList.toggle("bs-nerv", skin === "nerv");
+  }, [skin]);
+
   const chooseMotion = (m: Motion) => {
     setMotion(m);
     try { if (m === "system") localStorage.removeItem(MOTION_KEY); else localStorage.setItem(MOTION_KEY, m); } catch { /* 忽略 */ }
@@ -150,8 +238,15 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
       if (!charts.current[k]) charts.current[k] = echarts.init(el, null, { renderer: "svg" });
       return charts.current[k];
     };
-    const appColor = new Map(data.apps.map((a) => [a.name, a.color]));
-    const modelColor = (name: string, kind: string, i: number) => (kind === "fail" ? FAIL : kind === "other" ? GRAY : MODEL_RAMP[Math.min(i, 3)]);
+    // 軟體顏色：cyber 用伺服器算好的（依建立順序固定分配），nerv 換成自己那組，
+    // 但伺服器判定「不分配顏色」的那些（ops-manual、未歸戶）兩套都維持灰。
+    const appColor = new Map<string, string>();
+    let apSlot = 0;
+    for (const a of data.apps) {
+      appColor.set(a.name, !P.apps ? a.color : a.color === SERVER_GRAY ? P.gray : P.apps[apSlot++ % P.apps.length]);
+    }
+    const colOf = (a: { name: string; color: string }) => appColor.get(a.name) ?? P.gray;
+    const modelColor = (name: string, kind: string, i: number) => (kind === "fail" ? P.fail : kind === "other" ? P.gray : P.ramp[Math.min(i, 3)]);
 
     // 每日花費
     const daily = data.daily;
@@ -163,9 +258,9 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
       yAxis: { type: "value", max: Math.ceil(dMax * 1.15 * 10) / 10, splitNumber: 4, splitLine: { lineStyle: { color: C.grid, type: "dashed" } }, axisLabel: { color: C.muted, fontSize: 12, formatter: (v: number) => (v ? "$" + v.toFixed(2) : "0") } },
       series: [{
         type: "line", smooth: true, showSymbol: false, data: daily.map((d) => d.usd),
-        lineStyle: { width: 2.5, color: new G(0, 0, 1, 0, [{ offset: 0, color: "#4b88fd" }, { offset: 0.55, color: C.cy }, { offset: 1, color: VIOLET }]), shadowColor: "rgba(124,92,255,0.7)", shadowBlur: 12 },
+        lineStyle: { width: 2.5, color: new G(0, 0, 1, 0, [{ offset: 0, color: P.daily[0] }, { offset: 0.55, color: P.daily[1] }, { offset: 1, color: P.daily[2] }]), shadowColor: P.dailyGlow, shadowBlur: 12 },
         itemStyle: { color: C.cy },
-        areaStyle: { color: new G(0, 0, 0, 1, [{ offset: 0, color: "rgba(34,211,238,0.45)" }, { offset: 0.7, color: "rgba(75,136,253,0.10)" }, { offset: 1, color: "rgba(75,136,253,0)" }]) },
+        areaStyle: { color: new G(0, 0, 0, 1, [{ offset: 0, color: P.dailyArea[0] }, { offset: 0.7, color: P.dailyArea[1] }, { offset: 1, color: P.dailyArea[2] }]) },
         markPoint: { symbol: "pin", symbolSize: 44, itemStyle: { color: C.warn }, label: { color: "#1a1200", fontSize: 11, fontWeight: 700, formatter: "高點" }, data: [{ type: "max" }] },
       }],
     }, true);
@@ -184,8 +279,8 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
       title: { text: fmtInt(data.month.calls), subtext: "本月呼叫", left: "24%", top: "40%", textAlign: "center",
         textStyle: { color: "#fff", fontFamily: numFont, fontSize: 24, fontWeight: 700 }, subtextStyle: { color: C.muted, fontSize: 12 } },
       series: [
-        { type: "pie", radius: ["59%", "63%"], center: ["24%", "52%"], silent: true, label: { show: false }, data: [{ value: 1, itemStyle: { color: "rgba(154,133,255,0.32)" } }] },
-        { type: "pie", radius: ["42%", "56%"], center: ["24%", "52%"], padAngle: 2, itemStyle: { borderColor: "#041a4a", borderWidth: 2 }, label: { show: false }, data: mix },
+        { type: "pie", radius: ["59%", "63%"], center: ["24%", "52%"], silent: true, label: { show: false }, data: [{ value: 1, itemStyle: { color: P.ring } }] },
+        { type: "pie", radius: ["42%", "56%"], center: ["24%", "52%"], padAngle: 2, itemStyle: { borderColor: P.pieBorder, borderWidth: 2 }, label: { show: false }, data: mix },
       ],
     }, true);
 
@@ -198,8 +293,8 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
           type: "gauge", center: [`${pools.length === 1 ? 50 : 17 + i * (66 / Math.max(1, pools.length - 1))}%`, "50%"], radius: "56%",
           startAngle: 90, endAngle: -270, min: 0, max,
           pointer: { show: false }, progress: { show: true, roundCap: true, width: 10, itemStyle: { color: new G(0, 0, 1, 1, [{ offset: 0, color: C.good }, { offset: 1, color: C.cy }]) } },
-          axisLine: { lineStyle: { width: 10, color: [[1, "rgba(46,230,166,0.16)"]] } },
-          axisTick: { show: true, distance: -22, length: 4, splitNumber: 3, lineStyle: { color: "rgba(46,230,166,0.35)" } },
+          axisLine: { lineStyle: { width: 10, color: [[1, P.gaugeTrack]] } },
+          axisTick: { show: true, distance: -22, length: 4, splitNumber: 3, lineStyle: { color: P.gaugeTick } },
           splitLine: { show: false }, axisLabel: { show: false },
           title: { offsetCenter: [0, "118%"], color: C.ink2, fontSize: 13 },
           detail: { offsetCenter: [0, "-4%"], formatter: (v: number) => `{a|${v}}\n{b|/ ${p.limit ?? "未設"} 次}`,
@@ -218,14 +313,15 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
     const series: object[] = [];
     leftApps.forEach((a, i) => {
       const p = [8, yAt(i, leftApps.length)];
+      const ac = colOf(a);
       nodes.push({ name: a.name, value: p, symbolSize: a.calls ? 11 + Math.log10(a.calls + 1) * 5 : 8,
-        itemStyle: { color: a.idle ? "#3a4a72" : a.color, borderColor: tint(a.color, 0.5), borderWidth: 2, shadowBlur: a.calls ? 14 : 0, shadowColor: a.color },
+        itemStyle: { color: a.idle ? P.idle : ac, borderColor: tint(ac, 0.5), borderWidth: 2, shadowBlur: a.calls ? 14 : 0, shadowColor: ac },
         label: { show: true, position: "left", distance: 10, color: a.calls ? C.ink : C.muted, fontSize: 13.5,
           formatter: `{n|${a.name}}  {c|${a.calls ? fmtInt(a.calls) : "閒置"}}`,
-          rich: { n: { fontSize: 13.5 }, c: { fontFamily: numFont, fontSize: 12, color: a.calls ? tint(a.color, 0.35) : C.muted } } } });
+          rich: { n: { fontSize: 13.5 }, c: { fontFamily: numFont, fontSize: 12, color: a.calls ? tint(ac, 0.35) : C.muted } } } });
       if (a.calls) series.push({ type: "lines", coordinateSystem: "cartesian2d", zlevel: 1,
-        lineStyle: { curveness: 0.18, opacity: 0.8, width: w(a.calls), color: new G(0, 0, 1, 0, [{ offset: 0, color: a.color }, { offset: 1, color: VIOLET }]) },
-        effect: { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: tint(a.color, 0.55) },
+        lineStyle: { curveness: 0.18, opacity: 0.8, width: w(a.calls), color: new G(0, 0, 1, 0, [{ offset: 0, color: ac }, { offset: 1, color: P.hub }]) },
+        effect: { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: tint(ac, 0.55) },
         data: [{ coords: [p, hub], value: a.calls, name: a.name }] });
     });
     let ri = 0;
@@ -238,10 +334,10 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
         label: { show: true, position: "right", distance: 10, color: m.kind === "other" ? C.muted : C.ink, fontSize: 13.5,
           formatter: `{c|${fmtInt(m.calls)}}  {n|${m.name}}`,
           rich: { n: { fontSize: 13.5 }, c: { fontFamily: numFont, fontSize: 12, color: col } } } });
-      mLines.push({ coords: [hub, p], value: m.calls, name: m.name, lineStyle: { width: w(m.calls), color: new G(0, 0, 1, 0, [{ offset: 0, color: VIOLET }, { offset: 1, color: col }]) } });
+      mLines.push({ coords: [hub, p], value: m.calls, name: m.name, lineStyle: { width: w(m.calls), color: new G(0, 0, 1, 0, [{ offset: 0, color: P.hub }, { offset: 1, color: col }]) } });
     });
     series.push({ type: "lines", coordinateSystem: "cartesian2d", zlevel: 1, lineStyle: { curveness: 0.18, opacity: 0.7 },
-      effect: { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: "#f1edff" }, data: mLines });
+      effect: { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: P.line }, data: mLines });
     series.push({ type: "scatter", coordinateSystem: "cartesian2d", zlevel: 2, data: nodes });
     init("topo")?.setOption({
       // 上下、左右都對稱：閘道（座標 50,50）才會落在容器正中央，跟 CSS 的投影台對齊
@@ -265,8 +361,8 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
       series: [{
         type: "bar", barWidth: 16,
         data: hours.map((v, h) => ({ value: v, itemStyle: { color: h === peakH && v > 0
-          ? new G(0, 0, 0, 1, [{ offset: 0, color: "#ffd66b" }, { offset: 1, color: "rgba(255,154,61,0.2)" }])
-          : new G(0, 0, 0, 1, [{ offset: 0, color: "#7ff5c8" }, { offset: 0.5, color: C.good }, { offset: 1, color: "rgba(34,211,238,0.12)" }]) } })),
+          ? new G(0, 0, 0, 1, [{ offset: 0, color: P.hourPeak[0] }, { offset: 1, color: P.hourPeak[1] }])
+          : new G(0, 0, 0, 1, [{ offset: 0, color: P.hourBar[0] }, { offset: 0.5, color: P.hourBar[1] }, { offset: 1, color: P.hourBar[2] }]) } })),
         label: { show: true, position: "top", color: C.ink2, fontSize: 11, formatter: (p: { dataIndex: number; value: number }) => (p.dataIndex === peakH && p.value > 0 ? "高峰 " + p.value : "") },
       }],
     }, true);
@@ -280,15 +376,15 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
       xAxis: { type: "value", max: sMax, show: false },
       yAxis: { type: "category", data: spend.map((s) => s.name), axisLine: { show: false }, axisTick: { show: false },
         axisLabel: { fontSize: 13.5, color: C.ink, formatter: (n: string) => `{d${spend.findIndex((s) => s.name === n)}|■} ${n}`,
-          rich: Object.fromEntries(spend.map((s, i) => [`d${i}`, { color: appColor.get(s.name) ?? GRAY, fontSize: 12 }])) } },
+          rich: Object.fromEntries(spend.map((s, i) => [`d${i}`, { color: colOf(s), fontSize: 12 }])) } },
       series: [
         // 底條畫滿格；金額掛在底條尾端，所以每列金額對齊在同一欄（2026-09-11 修過錯位）
-        { type: "bar", barWidth: 12, silent: true, barGap: "-100%", data: spend.map(() => sMax), itemStyle: { color: "rgba(47,123,255,0.13)" },
+        { type: "bar", barWidth: 12, silent: true, barGap: "-100%", data: spend.map(() => sMax), itemStyle: { color: P.track },
           label: { show: true, position: "right", distance: 12,
             formatter: (p: { dataIndex: number }) => { const v = spend[p.dataIndex].spendUsd; return `{v|US$${v.toFixed(2)}}  {t|≈NT$${fmtInt(v * FX)}}`; },
             rich: { v: { color: "#ffffff", fontFamily: numFont, fontSize: 13, fontWeight: 600 }, t: { color: C.warn, fontSize: 12 } } } },
         { type: "bar", barWidth: 12, data: spend.map((s) => ({ value: s.spendUsd,
-          itemStyle: { color: new G(0, 0, 1, 0, [{ offset: 0, color: s.color }, { offset: 1, color: tint(s.color, 0.45) }]), shadowColor: s.color, shadowBlur: 8 } })) },
+          itemStyle: { color: new G(0, 0, 1, 0, [{ offset: 0, color: colOf(s) }, { offset: 1, color: tint(colOf(s), 0.45) }]), shadowColor: colOf(s), shadowBlur: 8 } })) },
       ],
     }, true);
     };
@@ -297,7 +393,7 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
     // 字型還沒到就量，文字會跟相鄰文字疊在一起（2026-09-12 排行的金額就是這樣疊到的）。
     document.fonts?.ready.then(() => { if (!cancelled) draw(); });
     return () => { cancelled = true; };
-  }, [data, still, numFont]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, still, numFont, skin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onResize = () => Object.values(charts.current).forEach((c) => c.resize());
@@ -319,21 +415,21 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
           <header className="bs-head">
             <svg viewBox="0 0 1920 92" width="1920" height="92" aria-hidden="true">
               <defs>
-                <linearGradient id="bs-hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0b44b0" stopOpacity="0.9" /><stop offset="1" stopColor="#041a55" stopOpacity="0.15" /></linearGradient>
+                <linearGradient id="bs-hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={P.head.g1} stopOpacity="0.9" /><stop offset="1" stopColor={P.head.g2} stopOpacity="0.15" /></linearGradient>
                 <linearGradient id="bs-hl" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0" stopColor="#22d3ee" stopOpacity="0" /><stop offset="0.3" stopColor="#22d3ee" /><stop offset="0.5" stopColor="#ffffff" />
-                  <stop offset="0.7" stopColor="#2ee6a6" /><stop offset="1" stopColor="#2ee6a6" stopOpacity="0" />
+                  <stop offset="0" stopColor={P.head.l1} stopOpacity="0" /><stop offset="0.3" stopColor={P.head.l1} /><stop offset="0.5" stopColor={P.head.l2} />
+                  <stop offset="0.7" stopColor={P.head.l3} /><stop offset="1" stopColor={P.head.l3} stopOpacity="0" />
                 </linearGradient>
               </defs>
-              <path d="M560 0 H1360 L1316 66 H604 Z" fill="url(#bs-hg)" stroke="#2a8cff" strokeWidth="1.5" />
-              <path d="M0 40 H470 L530 70 H604" fill="none" stroke="#1f6ad8" strokeWidth="2" />
-              <path d="M1920 40 H1450 L1390 70 H1316" fill="none" stroke="#1f6ad8" strokeWidth="2" />
+              <path d="M560 0 H1360 L1316 66 H604 Z" fill="url(#bs-hg)" stroke={P.head.edge} strokeWidth="1.5" />
+              <path d="M0 40 H470 L530 70 H604" fill="none" stroke={P.head.rail} strokeWidth="2" />
+              <path d="M1920 40 H1450 L1390 70 H1316" fill="none" stroke={P.head.rail} strokeWidth="2" />
               <path d="M604 66 H1316" stroke="url(#bs-hl)" strokeWidth="3" />
-              <path className="bs-flow" d="M0 40 H470 L530 70 H1390 L1450 40 H1920" fill="none" stroke="#9ff6ff" strokeWidth="2.5" />
-              <rect x="516" y="10" width="22" height="6" transform="skewX(-35)" fill="#22d3ee" />
-              <rect x="546" y="10" width="14" height="6" transform="skewX(-35)" fill="#ff9a3d" />
-              <rect x="1386" y="10" width="14" height="6" transform="skewX(35)" fill="#ff9a3d" />
-              <rect x="1404" y="10" width="22" height="6" transform="skewX(35)" fill="#2ee6a6" />
+              <path className="bs-flow" d="M0 40 H470 L530 70 H1390 L1450 40 H1920" fill="none" stroke={P.head.flow} strokeWidth="2.5" />
+              <rect x="516" y="10" width="22" height="6" transform="skewX(-35)" fill={P.head.chipA} />
+              <rect x="546" y="10" width="14" height="6" transform="skewX(-35)" fill={P.head.chipB} />
+              <rect x="1386" y="10" width="14" height="6" transform="skewX(35)" fill={P.head.chipB} />
+              <rect x="1404" y="10" width="22" height="6" transform="skewX(35)" fill={P.head.chipC} />
             </svg>
             <div className="bs-sub-l"><span>{dateLabel}</span><span>AI 用量與成本</span></div>
             <h1>CostScale AI 閘道營運大屏</h1>
@@ -343,6 +439,7 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
             </div>
             <div className="bs-tools-l">資料更新 {updated} · 每 60 秒自動更新 · 本月、每日、每小時都以台北時間計</div>
             <div className="bs-tools-r">
+              <button type="button" className="bs-btn bs-skin" onClick={cycleSkin} title="按一下換下一種大屏風格">風格 · {SKIN_NAME[skin]}</button>
               <span className="bs-seg" role="group" aria-label="動態效果">
                 <span className="bs-seg-lab">動態</span>
                 {(["system", "on", "off"] as Motion[]).map((m) => (
@@ -359,13 +456,13 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
           </header>
 
           <div className="bs-col bs-left">
-            <Box idx={0} acc="#22d3ee" title="每日閘道花費" note="近 30 天 · 台北日 · 美元" src="SRC · SpendLogs · 日">
+            <Box idx={0} acc={A.daily} title="每日閘道花費" note="近 30 天 · 台北日 · 美元" src="SRC · SpendLogs · 日">
               <div className="bs-chart" ref={els.daily} />
             </Box>
-            <Box idx={1} acc="#bfb0ff" title="模型用量" note="本月 · 依呼叫次數" src="SRC · SpendLogs · model_group">
+            <Box idx={1} acc={A.mix} title="模型用量" note="本月 · 依呼叫次數" src="SRC · SpendLogs · model_group">
               <div className="bs-chart" ref={els.mix} />
             </Box>
-            <Box idx={2} acc="#2ee6a6" title="免費額度" note="今日 · 台北 00:00 起" src="SRC · quota_pools × 金鑰盤點">
+            <Box idx={2} acc={A.free} title="免費額度" note="今日 · 台北 00:00 起" src="SRC · quota_pools × 金鑰盤點">
               <div className="bs-chart" ref={els.free} />
               {poolManual ? <span className="bs-warn-chip">讀不到閘道設定，{poolManual.name} 暫用手填的 {poolManual.keys} 把</span> : null}
             </Box>
@@ -373,43 +470,43 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
 
           <div className="bs-col bs-mid">
             <div className="bs-counters">
-              <section className="bs-box bs-counter" style={{ "--acc": "#22d3ee" } as React.CSSProperties}>
+              <section className="bs-box bs-counter" style={{ "--acc": A.calls } as React.CSSProperties}>
                 <span className="bs-lab">本月呼叫</span>
                 <Digits value={fmtInt(data.month.calls)} still={still} suffix="次" />
                 <span className="bs-alt">失敗 <b>{fmtInt(data.month.failed)}</b> 次（{data.month.calls ? ((data.month.failed / data.month.calls) * 100).toFixed(1) : "0"}%）</span>
               </section>
-              <section className="bs-box bs-counter" style={{ "--acc": "#2ee6a6" } as React.CSSProperties}>
+              <section className="bs-box bs-counter" style={{ "--acc": A.tokens } as React.CSSProperties}>
                 <span className="bs-lab">本月 Token</span>
                 <Digits value={fmtInt(data.month.tokens)} still={still} />
                 <span className="bs-alt">經閘道的部分</span>
               </section>
-              <section className="bs-box bs-counter" style={{ "--acc": "#ff9a3d" } as React.CSSProperties}>
+              <section className="bs-box bs-counter" style={{ "--acc": A.spend } as React.CSSProperties}>
                 <span className="bs-lab">本月閘道花費</span>
                 <Digits value={data.month.spendUsd.toFixed(2)} still={still} prefix="US$" />
                 <span className="bs-alt">約 <b>NT${fmtInt(data.month.spendUsd * FX)}</b> · 匯率 {FX.toFixed(2)}{data.fx.stale ? "（匯率超過兩天沒更新）" : ""}</span>
               </section>
             </div>
 
-            <Box idx={3} acc="#9a85ff" title="流量拓撲" note="軟體 → 閘道 → 模型 · 本月呼叫次數 · 線越粗越多" src="SRC · SpendLogs × apps" className="bs-topo">
+            <Box idx={3} acc={A.topo} title="流量拓撲" note="軟體 → 閘道 → 模型 · 本月呼叫次數 · 線越粗越多" src="SRC · SpendLogs × apps" className="bs-topo">
               <div className="bs-floor" />
               <div className="bs-holo"><span className="d1" /><span className="d2" /><span className="d3" /></div>
               <div className="bs-beam" />
               <div className="bs-core" />
               <div className="bs-chart" ref={els.topo} />
               <div className="bs-hub"><b>閘道</b><small>{fmtInt(data.month.calls)}</small></div>
-              <div className="bs-legend"><span><b>左</b> 軟體（各自的顏色）</span><span><b>右</b> 模型（藍紫，越亮流量越大）</span></div>
+              <div className="bs-legend"><span><b>左</b> 軟體（各自的顏色）</span><span><b>右</b> 模型（{P.modelWord}，越亮流量越大）</span></div>
             </Box>
 
-            <Box idx={4} acc="#2ee6a6" title="近 24 小時每小時呼叫" note={`台北時間 · 截至 ${data.hourlyThrough}`} src="SRC · SpendLogs · 台北時區">
+            <Box idx={4} acc={A.hour} title="近 24 小時每小時呼叫" note={`台北時間 · 截至 ${data.hourlyThrough}`} src="SRC · SpendLogs · 台北時區">
               <div className="bs-chart" ref={els.hour} />
             </Box>
           </div>
 
           <div className="bs-col bs-right">
-            <Box idx={5} acc="#ff9a3d" title="軟體費用排行" note="本月 · 美元（約台幣）" src="SRC · SpendLogs × apps">
+            <Box idx={5} acc={A.rank} title="軟體費用排行" note="本月 · 美元（約台幣）" src="SRC · SpendLogs × apps">
               <div className="bs-chart" ref={els.apps} />
             </Box>
-            <Box idx={6} acc="#2ee6a6" title="訂閱省下多少" note="官方 API 價目換算" src="SRC · cli_session_usage">
+            <Box idx={6} acc={A.save} title="訂閱省下多少" note="官方 API 價目換算" src="SRC · cli_session_usage">
               <div className="bs-save">
                 <div className="bs-big"><strong>NT${fmtInt(saved)}</strong><span>本月省下</span></div>
                 {data.savings.rows.filter((r) => !r.noData).map((r) => (
@@ -425,7 +522,7 @@ export default function BigScreenClient({ data, numFont }: { data: BigScreenData
                 </div>
               </div>
             </Box>
-            <Box idx={7} acc="#ff6aa8" title="最近異常" note="失敗的請求＋預算告警 · 滑過暫停" src="SRC · SpendLogs · budget_alerts">
+            <Box idx={7} acc={A.events} title="最近異常" note="失敗的請求＋預算告警 · 滑過暫停" src="SRC · SpendLogs · budget_alerts">
               <div className="bs-events">
                 <div className="bs-track">
                   {[0, 1].map((k) => (
