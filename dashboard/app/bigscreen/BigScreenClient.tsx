@@ -627,7 +627,9 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               <span className={data.gateway.ok ? "bs-ok" : "bs-bad"}><span className="bs-dot" /> 閘道 {data.gateway.detail}</span>
               <span className="bs-clock">{clock}</span>
             </div>
-            <div className="bs-tools-l">資料更新 {updated} · 每 60 秒自動更新 · 本月、每日、每小時都以台北時間計</div>
+            {/* 拆成兩段：扁平外觀的頁首左邊被徽章佔掉，一行放不下（會穿過橫幅的斜線），改成兩行；
+                藍紫科幻那版分隔號照常顯示、維持一行。 */}
+            <div className="bs-tools-l"><span>資料更新 {updated} · 每 60 秒自動更新</span><i className="bs-tl-sep"> · </i><span>本月、每日、每小時都以台北時間計</span></div>
             <div className="bs-tools-r">
               <button type="button" className="bs-btn bs-skin" onClick={cycleSkin} title="按一下換下一種大屏風格">風格 · {SKIN_NAME[skin]}</button>
               <span className="bs-seg" role="group" aria-label="動態效果">

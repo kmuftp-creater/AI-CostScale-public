@@ -73,6 +73,7 @@
 .bs-ok { color: var(--bs-good); }
 .bs-bad { color: var(--bs-crit); }
 .bs-tools-l { position: absolute; left: 36px; top: 54px; font: 12px var(--bs-body); color: var(--bs-muted); letter-spacing: 0.04em; }
+.bs-tools-l i { font-style: normal; }
 .bs-tools-r { position: absolute; right: 36px; top: 50px; display: flex; gap: 8px; align-items: center; }
 .bs-seg { display: inline-flex; align-items: center; border: 1px solid rgba(38, 110, 214, 0.7); background: rgba(5, 28, 84, 0.6); }
 .bs-seg-lab { font: 12px var(--bs-body); color: var(--bs-muted); padding: 0 8px; }
@@ -473,6 +474,13 @@
 /* 徽章佔掉左邊，日期與說明往右讓位——但不能推過 560px，那裡是置中大標的起點（2026-09-12 撞過） */
 .bs-nerv .bs-sub-l { left: 240px; top: 14px; font-size: 15px; letter-spacing: 0.1em; gap: 14px; }
 .bs-nerv .bs-tools-l { left: 240px; top: 48px; letter-spacing: 0.04em; }
+/* 說明文字拆兩行（2026-09-13 User：「最上方橫幅跑版」）。
+   量過：一行時是 x 240～676，而橫幅外側的斜線從 x 470 開始往下斜（M0 40 H470 L530 70），
+   橫幅本體從 x 560 開始——文字穿過斜線、鑽進橫幅底下。
+   兩行、11px：第一行約 220px（到 x 460 內）、第二行約 183px；底在 y 79，警戒條紋從 84 開始。 */
+.bs-nerv .bs-tools-l { display: flex; flex-direction: column; gap: 1px; font-size: 11px; line-height: 1.35; }
+.bs-nerv .bs-tools-l span { white-space: nowrap; }
+.bs-nerv .bs-tools-l .bs-tl-sep { display: none; }
 
 /* ── 拓撲要會動（2026-09-12 User：「這裡要會動」）──
    第二版把所有發光動畫拿掉時，連「會動的東西」也一起關掉了，中央變成完全靜止的準星。
@@ -698,8 +706,14 @@
 .bs-cmd .bs-fig-mix  { right: 6px;  bottom: 0; height: 96%; }
 .bs-cmd .bs-fig-free { right: -10px; bottom: -4px; height: 62%; opacity: 0.52; }
 .bs-cmd .bs-fig-hour { right: 8px;  bottom: 0; height: 94%; }
-/* 訂閱省下多少：左右對稱的構圖，放正中間；往上抬 40px 讓手套落在兩條長條之間、避開說明文字 */
-.bs-cmd .bs-fig-save { left: 50%; transform: translateX(-50%); bottom: 40px; height: 72%; opacity: 0.28; }
+/* 訂閱省下多少：左右對稱的構圖，放正中間。
+   位置是**算出來的**（2026-09-13 User：「眼鏡剛好被遮住」）：
+   - 鏡片在原圖高度 24.4%～31.4%（像素量測，中心 27.9%）
+   - 面板裡：大數字 y 520～570、Claude Code 那組 582～625、Codex 那組 637～676、說明文字 688～728（舞台座標）
+   - 鏡片中心要落在 640：兩組長條之間，Codex 的長條幾乎是空的，鏡片的光透得出來
+   - 高 220px、定位容器底在 750 → 圖頂 = 640 − 0.279×220 = 579 → 圖底 799 → bottom = 750 − 799 = −49px
+   只放大會讓鏡片往上跑進數字；只往下則手套整個壓在說明文字上，所以兩個一起調。 */
+.bs-cmd .bs-fig-save { left: 50%; transform: translateX(-50%); bottom: -49px; height: 220px; opacity: 0.3; }
 
 /* 每日閘道花費：機體圖（已去背，所以透明度可以拉高一點；左側漸層遮罩讓它不跟折線打架） */
 .bs-cmd .bs-unitmark {
