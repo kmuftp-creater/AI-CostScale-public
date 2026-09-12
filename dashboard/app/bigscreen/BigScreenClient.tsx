@@ -403,7 +403,9 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
           rich: { n: { fontSize: 13.5 }, c: { fontFamily: numFont, fontSize: 12, color: a.calls ? tint(ac, 0.35) : C.muted } } } });
       if (a.calls) series.push({ type: "lines", coordinateSystem: "cartesian2d", zlevel: 1,
         lineStyle: { curveness: P.flat ? 0 : 0.18, opacity: P.flat ? 0.95 : 0.8, width: w(a.calls), color: P.flat ? ac : new G(0, 0, 1, 0, [{ offset: 0, color: ac }, { offset: 1, color: P.hub }]) },
-        effect: { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: tint(ac, 0.55) },
+        effect: P.flat
+          ? { show: !still, period: 2.2, trailLength: 0, symbol: "rect", symbolSize: 9, color: "#ffcc00" }
+          : { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: tint(ac, 0.55) },
         data: [{ coords: [p, hub], value: a.calls, name: a.name }] });
     });
     let ri = 0;
@@ -419,7 +421,9 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
       mLines.push({ coords: [hub, p], value: m.calls, name: m.name, lineStyle: { width: w(m.calls), color: P.flat ? col : new G(0, 0, 1, 0, [{ offset: 0, color: P.hub }, { offset: 1, color: col }]) } });
     });
     series.push({ type: "lines", coordinateSystem: "cartesian2d", zlevel: 1, lineStyle: { curveness: P.flat ? 0 : 0.18, opacity: P.flat ? 0.9 : 0.7 },
-      effect: { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: P.line }, data: mLines });
+      effect: P.flat
+        ? { show: !still, period: 2.6, trailLength: 0, symbol: "rect", symbolSize: 9, color: "#ffe9c7" }
+        : { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: P.line }, data: mLines });
     series.push({ type: "scatter", coordinateSystem: "cartesian2d", zlevel: 2, data: nodes });
     init("topo")?.setOption({
       // 上下、左右都對稱：閘道（座標 50,50）才會落在容器正中央，跟 CSS 的投影台對齊

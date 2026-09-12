@@ -473,3 +473,42 @@
 /* 徽章佔掉左邊，日期與說明往右讓位——但不能推過 560px，那裡是置中大標的起點（2026-09-12 撞過） */
 .bs-nerv .bs-sub-l { left: 240px; top: 14px; font-size: 15px; letter-spacing: 0.1em; gap: 14px; }
 .bs-nerv .bs-tools-l { left: 240px; top: 48px; letter-spacing: 0.04em; }
+
+/* ── 拓撲要會動（2026-09-12 User：「這裡要會動」）──
+   第二版把所有發光動畫拿掉時，連「會動的東西」也一起關掉了，中央變成完全靜止的準星。
+   扁平外觀不適合拖尾光暈，所以改成這幾種：準星慢轉、內圈脈動、扇形掃描（雷達那種）。
+   動態設定選「關」時全部停下——.bs-still 掛在內層，所以選擇器是 .bs-nerv .bs-still。 */
+@keyframes bs-nv-spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes bs-nv-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes bs-nv-sweep { to { transform: rotate(360deg); } }
+
+.bs-nerv .bs-holo .d1 { animation: bs-nv-spin 26s linear infinite; }
+.bs-nerv .bs-holo .d2 { animation: bs-nv-spin 64s linear infinite reverse; }
+.bs-nerv .bs-holo .d3 { animation: bs-nv-pulse 2.6s ease-in-out infinite; }
+.bs-nerv .bs-topo .bs-bc::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 344px; height: 344px;
+  margin: -172px 0 0 -172px; border-radius: 50%; z-index: 0; pointer-events: none;
+  background: conic-gradient(from 0deg, rgba(255, 106, 0, 0.38), rgba(255, 106, 0, 0) 26%);
+  -webkit-mask: radial-gradient(circle, #000 0 47%, transparent 48%);
+  mask: radial-gradient(circle, #000 0 47%, transparent 48%);
+  animation: bs-nv-sweep 5.2s linear infinite;
+}
+.bs-nerv .bs-still .bs-holo span,
+.bs-nerv .bs-still .bs-topo .bs-bc::before { animation: none !important; }
+
+/* 拓撲的連線自己會流動（2026-09-12 User：「這裡要會動」）。
+   ECharts 的 lines effect（沿線飛的小方塊）照舊開著，這裡再加一層 CSS 流動虛線：
+   扁平外觀適合這種「一格一格往前送」的感覺，而且不依賴圖表庫的特效。
+   選擇器只打 .bs-topo 裡 fill="none" 的 path，那就是連線（節點方塊是有 fill 的）。
+
+   查這件事時繞過一段路，寫下來免得再犯：我先在內建瀏覽器面板量「動畫有沒有在跑」，
+   得到 innerHTML 完全沒變、`animation.currentTime` 停在同一個數字，於是下結論「SVG 渲染模式不會動」。
+   那是**假的**——那個面板沒有真正繪製，動畫時鐘是凍結的（`visibilityState` 還顯示 visible，騙人）。
+   正確的量法：用無頭瀏覽器跑兩個不同的 `--virtual-time-budget`（例 4000 與 4260 毫秒）各截一張，
+   比對雜湊，不同就是真的在動。實測 39B7A844 vs A58EA613，確認會動。 */
+@keyframes bs-nv-dash { to { stroke-dashoffset: -44; } }
+.bs-nerv .bs-topo .bs-chart svg path[fill="none"] {
+  stroke-dasharray: 16 28;
+  animation: bs-nv-dash 1.15s linear infinite;
+}
+.bs-nerv .bs-still .bs-topo .bs-chart svg path[fill="none"] { animation: none; stroke-dasharray: none; }
