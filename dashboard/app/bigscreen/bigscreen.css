@@ -292,9 +292,15 @@
 }
 
 /* ── 標題列 ── */
+/* 標題字距要**算**，不能憑感覺加寬（2026-09-13 User：「最上方橫幅跑版」，第二次才修對）。
+   橫幅梯形 M560 0 H1360 L1316 66 H604：字形底部（y≈50）處左右邊界是 x 593～1327。
+   量出標題總寬 = 439 + 19 × 字距（19 個字，每字後面都有一格，含最後一個），三種外觀都吻合。
+   左右各留 24px → 字形寬 ≤ 694 → 字距 ≤ 14.2px → 用 0.38em（13.7px，字形寬約 685）。
+   text-indent 補回最後一個字後面那格字距，視覺才會真的置中在 x 960。
+   原本 0.42em（寬 727，左緣貼著斜邊）、作戰指揮 0.5em（寬 781，左右都穿出去）。 */
 .bs-nerv .bs-head h1 {
   background: none; color: var(--nv); -webkit-text-fill-color: var(--nv);
-  font-weight: 900; letter-spacing: 0.42em; filter: none;
+  font-weight: 900; letter-spacing: 0.38em; text-indent: 0.38em; filter: none;
 }
 /* 標題底下再壓一條警戒帶 */
 .bs-nerv .bs-head::after {
@@ -552,7 +558,7 @@
 /* 標題：白色實心、字距更寬 */
 .bs-cmd .bs-head h1 {
   color: #ffffff; -webkit-text-fill-color: #ffffff;
-  letter-spacing: 0.5em; font-weight: 900;
+  letter-spacing: 0.38em; text-indent: 0.38em; font-weight: 900; /* 字距上限見 .bs-nerv .bs-head h1 的說明 */
 }
 .bs-cmd .bs-head::after { opacity: 1; }
 
