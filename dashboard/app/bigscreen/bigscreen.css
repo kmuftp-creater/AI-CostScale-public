@@ -737,3 +737,30 @@
 
 /* 頁首的標誌圖：兩種扁平外觀都用 */
 .bs-nerv .bs-emblem-img img { height: 58px; }
+
+/* ══ 文字徽章：沒有貼紙圖檔時，用自己排的字代替（2026-09-13）══
+   公開版不含任何素材圖檔（貼紙圖是別人畫的作品，不能跟著 MIT 授權散布），
+   但 User 希望公開版也有「警戒、機密、人類補完計画…」這些字。
+   **字本身可以用，有問題的是那張圖**——所以用 CSS 重新排一次：白框、粗體、字距，跟貼紙同一種語氣。
+   只做一般文字，不做標誌類的圖形（葉標、六角機體標）。私有版有圖檔時照常顯示圖，這些規則用不到。 */
+.bs-cmd .bs-tag {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; flex: none;
+  border: 1.5px solid currentColor; padding: 1px 6px; line-height: 1;
+  color: rgba(255, 255, 255, 0.84); font: 900 13px var(--bs-body); letter-spacing: 0.12em;
+  white-space: nowrap; pointer-events: none;
+}
+.bs-cmd .bs-tag b { font-weight: 900; }
+.bs-cmd .bs-tag small { font: 700 7px var(--bs-num); letter-spacing: 0.1em; margin-top: 2px; }
+/* 面板標題列右端 */
+.bs-cmd .bs-tag.bs-bt-decal { height: 20px; margin-left: 12px; padding: 0 5px; font-size: 11px; opacity: 0.85; }
+/* 警戒橫幅兩端：沒失敗是黑底白框，有失敗是紅底，字要反成黑色 */
+.bs-cmd .bs-alarm .bs-tag { height: 18px; padding: 0 6px; font-size: 12px; letter-spacing: 0.16em; }
+.bs-cmd .bs-alarm.on .bs-tag { color: #0b0805; }
+/* 拓撲右上的機密章 */
+/* 量過：原本 19px 字、高 46px（y 342～388），下緣壓到右上第一列模型標籤（約 y 392 起）。
+   改 15px、往上 4px，高度約 33px，跟標籤留 10px 以上。 */
+.bs-cmd .bs-tag.bs-topo-secret { position: absolute; right: 16px; top: 8px; z-index: 2; height: auto; padding: 2px 7px 2px; font-size: 15px; letter-spacing: 0.16em; opacity: 0.72; }
+.bs-cmd .bs-tag.bs-topo-secret small { font-size: 7px; }
+/* 側邊直排字上方：欄只有 28px 寬，徽章也直排（writing-mode 只給徽章自己，不給 flex 容器，見 L-240） */
+.bs-cmd .bs-edge .bs-tag { writing-mode: vertical-rl; text-orientation: upright; padding: 4px 1px; font-size: 11px; letter-spacing: 0.08em; opacity: 0.8; }
+
