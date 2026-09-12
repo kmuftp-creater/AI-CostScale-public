@@ -239,7 +239,8 @@ const TAG_TEXT: Partial<Record<AssetSlot, { t: string; sub?: string }>> = {
   alarm: { t: "警戒" }, urgent: { t: "緊急報告" }, sortie: { t: "出擊" }, berserk: { t: "暴走" },
   secret: { t: "機密", sub: "TOP SECRET" }, secret2: { t: "超機密" },
   nervleaf: { t: "內部" }, // 左側直排字上方；右側有「超機密」，左邊空著會不對稱
-  agency: { t: "特務機關" }, plan: { t: "人類補完計画" }, power: { t: "電力充足" },
+  agency: { t: "特務機關" }, power: { t: "電力充足" },
+  // plan（人類補完計画）不做文字徽章：User 2026-09-13「人類補完計画 不放」。私有版有圖檔照常顯示。
 };
 
 function Box({ acc, title, note, src, idx, children, className = "", decal }: {
