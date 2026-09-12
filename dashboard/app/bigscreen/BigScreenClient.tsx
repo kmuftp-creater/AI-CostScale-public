@@ -8,7 +8,7 @@ import { LineChart, PieChart, GaugeChart, BarChart, LinesChart, ScatterChart } f
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent, MarkPointComponent } from "echarts/components";
 import { SVGRenderer } from "echarts/renderers";
 import type { BigScreenData } from "@/lib/bigscreen";
-import { SKIN_KEY, SKIN_ORDER, SKIN_NAME, SKIN_CLASS, type Skin } from "./skins";
+import { SKIN_KEY, SKIN_ORDER, SKIN_NAME, SKIN_CLASS, type Skin, type Assets, type AssetSlot } from "./skins";
 
 echarts.use([LineChart, PieChart, GaugeChart, BarChart, LinesChart, ScatterChart,
   GridComponent, TooltipComponent, LegendComponent, TitleComponent, MarkPointComponent, SVGRenderer]);
@@ -230,13 +230,16 @@ function Digits({ value, still, prefix, suffix, seg }: { value: string; still: b
   );
 }
 
-function Box({ acc, title, note, src, idx, children, className = "" }: {
+function Box({ acc, title, note, src, idx, children, className = "", decal }: {
   acc: string; title: string; note?: string; src?: string; idx: number; children: React.ReactNode; className?: string;
+  /** 標題列右端的小標（私有素材，沒放就不畫） */
+  decal?: string;
 }) {
   const style = { "--acc": acc, "--dur": `${7 + ((idx * 37) % 6)}s`, "--delay": `${-((idx * 1.7) % 7).toFixed(1)}s` } as React.CSSProperties;
   return (
     <section className={`bs-box ${src ? "bs-has-foot" : ""} ${className}`} style={style}>
-      <div className="bs-bt"><i /><span>{title}</span>{note ? <em>{note}</em> : null}</div>
+      <div className="bs-bt"><i /><span>{title}</span>{note ? <em>{note}</em> : null}
+        {decal ? <img className="bs-bt-decal" src={decal} alt="" aria-hidden="true" /> : null}</div>
       <div className="bs-bc">{children}</div>
       {src ? <div className="bs-foot"><span className="bs-ticks" /><span className="bs-hud">{src}</span></div> : null}
     </section>
@@ -247,8 +250,8 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
   data: BigScreenData;
   numFont: string;
   initialSkin?: Skin | null;
-  /** public/private/ 底下的素材網址（page.tsx 在伺服器端找 png／jpg／webp）。沒放就是 null，改用原創徽章。 */
-  assets?: { logo: string | null; mark: string | null };
+  /** public/private/ 底下的素材網址（page.tsx 在伺服器端逐個插槽找）。沒放的插槽就不會出現。 */
+  assets?: Assets;
 }) {
   const router = useRouter();
   const vpRef = useRef<HTMLDivElement>(null);
@@ -266,6 +269,8 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
   const still = motion === "off";
   const FX = data.fx.rate;
   const P = SKINS[skin];
+  /** 貼紙類素材只在「作戰指揮」出現；logo 在兩種扁平外觀都用。 */
+  const dc = (k: AssetSlot) => (skin === "cmd" ? assets?.[k] : undefined);
   const C = P.C;
   const A = P.acc;
   const TIP = { backgroundColor: P.tip.bg, borderColor: P.tip.border, borderWidth: 1, textStyle: { color: C.ink, fontSize: 13 } };
@@ -538,15 +543,26 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
         <div className="bs-stage" ref={stRef}>
           {skin === "cmd" ? (
             <>
-              {/* 側邊直排字與警戒橫幅：純造型，字是我們自己的 */}
-              <div className="bs-edge bs-edge-l" aria-hidden="true">監 視 中</div>
-              <div className="bs-edge bs-edge-r" aria-hidden="true">記 錄 中</div>
+              {/* 背景圖鋪滿舞台、壓很淡；面板本身改成半透明，所以整個畫面都有底圖的質地 */}
+              {dc("mark") ? <img className="bs-bgmark" src={dc("mark")} alt="" aria-hidden="true" /> : null}
+              {/* 側邊直排字（字是我們自己的）＋上方各一個小標 */}
+              <div className="bs-edge bs-edge-l" aria-hidden="true">
+                {dc("nervleaf") ? <img src={dc("nervleaf")} alt="" /> : null}
+                <span>監 視 中</span>
+              </div>
+              <div className="bs-edge bs-edge-r" aria-hidden="true">
+                {dc("secret2") ? <img src={dc("secret2")} alt="" /> : null}
+                <span>記 錄 中</span>
+              </div>
               {/* 失敗數是真的資料：有失敗才亮紅幅，沒有就顯示正常 */}
               <div className={`bs-alarm ${data.month.failed ? "on" : ""}`}>
-                {data.month.failed
+                {dc("alarm") ? <img src={dc("alarm")} alt="" aria-hidden="true" /> : null}
+                <b>{data.month.failed
                   ? `本月偵測到 ${fmtInt(data.month.failed)} 筆失敗請求`
-                  : "本月無失敗請求"}
+                  : "本月無失敗請求"}</b>
+                {dc("sortie") ? <img src={dc("sortie")} alt="" aria-hidden="true" /> : null}
               </div>
+              {dc("weapon") ? <img className="bs-botmark" src={dc("weapon")} alt="" aria-hidden="true" /> : null}
             </>
           ) : null}
           <header className="bs-head">
@@ -597,13 +613,13 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
           </header>
 
           <div className="bs-col bs-left">
-            <Box idx={0} acc={A.daily} title="每日閘道花費" note="近 30 天 · 台北日 · 美元" src="SRC · SpendLogs · 日">
+            <Box idx={0} acc={A.daily} decal={dc("internal")} title="每日閘道花費" note="近 30 天 · 台北日 · 美元" src="SRC · SpendLogs · 日">
               <div className="bs-chart" ref={els.daily} />
             </Box>
-            <Box idx={1} acc={A.mix} title="模型用量" note="本月 · 依呼叫次數" src="SRC · SpendLogs · model_group">
+            <Box idx={1} acc={A.mix} decal={dc("eva01")} title="模型用量" note="本月 · 依呼叫次數" src="SRC · SpendLogs · model_group">
               <div className="bs-chart" ref={els.mix} />
             </Box>
-            <Box idx={2} acc={A.free} title="免費額度" note="今日 · 台北 00:00 起" src="SRC · quota_pools × 金鑰盤點">
+            <Box idx={2} acc={A.free} decal={dc("power")} title="免費額度" note="今日 · 台北 00:00 起" src="SRC · quota_pools × 金鑰盤點">
               <div className="bs-chart" ref={els.free} />
               {poolManual ? <span className="bs-warn-chip">讀不到閘道設定，{poolManual.name} 暫用手填的 {poolManual.keys} 把</span> : null}
             </Box>
@@ -613,24 +629,29 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
             <div className="bs-counters">
               <section className="bs-box bs-counter" style={{ "--acc": A.calls } as React.CSSProperties}>
                 <span className="bs-lab">本月呼叫</span>
+                {dc("unit01") ? <img className="bs-ct-decal" src={dc("unit01")} alt="" aria-hidden="true" /> : null}
                 <Digits value={fmtInt(data.month.calls)} still={still} suffix="次" seg={P.flat} />
                 <span className="bs-alt">失敗 <b>{fmtInt(data.month.failed)}</b> 次（{data.month.calls ? ((data.month.failed / data.month.calls) * 100).toFixed(1) : "0"}%）</span>
               </section>
               <section className="bs-box bs-counter" style={{ "--acc": A.tokens } as React.CSSProperties}>
                 <span className="bs-lab">本月 Token</span>
+                {dc("unit02") ? <img className="bs-ct-decal" src={dc("unit02")} alt="" aria-hidden="true" /> : null}
                 <Digits value={fmtInt(data.month.tokens)} still={still} seg={P.flat} />
                 <span className="bs-alt">經閘道的部分</span>
               </section>
               <section className="bs-box bs-counter" style={{ "--acc": A.spend } as React.CSSProperties}>
                 <span className="bs-lab">本月閘道花費</span>
+                {dc("unit03") ? <img className="bs-ct-decal" src={dc("unit03")} alt="" aria-hidden="true" /> : null}
                 <Digits value={data.month.spendUsd.toFixed(2)} still={still} prefix="US$" seg={P.flat} />
                 <span className="bs-alt">約 <b>NT${fmtInt(data.month.spendUsd * FX)}</b> · 匯率 {FX.toFixed(2)}{data.fx.stale ? "（匯率超過兩天沒更新）" : ""}</span>
               </section>
             </div>
 
-            <Box idx={3} acc={A.topo} title="流量拓撲" note="軟體 → 閘道 → 模型 · 本月呼叫次數 · 線越粗越多" src="SRC · SpendLogs × apps" className="bs-topo">
-              {/* 私有素材：舞台其他地方都被面板蓋住，放這裡才看得到（壓得很暗，只當氣氛） */}
-              {skin === "cmd" && assets?.mark ? <img className="bs-pmark" src={assets.mark} alt="" aria-hidden="true" /> : null}
+            <Box idx={3} acc={A.topo} decal={dc("eva02")} title="流量拓撲" note="軟體 → 閘道 → 模型 · 本月呼叫次數 · 線越粗越多" src="SRC · SpendLogs × apps" className="bs-topo">
+              {/* 私有素材：中央徽章、右上角小標、左下人物剪影 */}
+              {dc("nerv") ? <img className="bs-hubmark" src={dc("nerv")} alt="" aria-hidden="true" /> : null}
+              {dc("secret") ? <img className="bs-topo-secret" src={dc("secret")} alt="" aria-hidden="true" /> : null}
+              {dc("char") ? <img className="bs-char" src={dc("char")} alt="" aria-hidden="true" /> : null}
               <div className="bs-floor" />
               <div className="bs-holo"><span className="d1" /><span className="d2" /><span className="d3" /></div>
               <div className="bs-beam" />
@@ -640,16 +661,16 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               <div className="bs-legend"><span><b>左</b> 軟體（各自的顏色）</span><span><b>右</b> 模型（{P.modelWord}，越亮流量越大）</span></div>
             </Box>
 
-            <Box idx={4} acc={A.hour} title="近 24 小時每小時呼叫" note={`台北時間 · 截至 ${data.hourlyThrough}`} src="SRC · SpendLogs · 台北時區">
+            <Box idx={4} acc={A.hour} decal={dc("eva00")} title="近 24 小時每小時呼叫" note={`台北時間 · 截至 ${data.hourlyThrough}`} src="SRC · SpendLogs · 台北時區">
               <div className="bs-chart" ref={els.hour} />
             </Box>
           </div>
 
           <div className="bs-col bs-right">
-            <Box idx={5} acc={A.rank} title="軟體費用排行" note="本月 · 美元（約台幣）" src="SRC · SpendLogs × apps">
+            <Box idx={5} acc={A.rank} decal={dc("agency")} title="軟體費用排行" note="本月 · 美元（約台幣）" src="SRC · SpendLogs × apps">
               <div className="bs-chart" ref={els.apps} />
             </Box>
-            <Box idx={6} acc={A.save} title="訂閱省下多少" note="官方 API 價目換算" src="SRC · cli_session_usage">
+            <Box idx={6} acc={A.save} decal={dc("plan")} title="訂閱省下多少" note="官方 API 價目換算" src="SRC · cli_session_usage">
               <div className="bs-save">
                 <div className="bs-big"><strong>NT${fmtInt(saved)}</strong><span>本月省下</span></div>
                 {data.savings.rows.filter((r) => !r.noData).map((r) => (
@@ -665,7 +686,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
                 </div>
               </div>
             </Box>
-            <Box idx={7} className="bs-ev" acc={A.events} title="最近異常" note="失敗的請求＋預算告警 · 滑過暫停" src="SRC · SpendLogs · budget_alerts">
+            <Box idx={7} className="bs-ev" acc={A.events} decal={dc("berserk")} title="最近異常" note="失敗的請求＋預算告警 · 滑過暫停" src="SRC · SpendLogs · budget_alerts">
               <div className="bs-events">
                 <div className="bs-track">
                   {[0, 1].map((k) => (

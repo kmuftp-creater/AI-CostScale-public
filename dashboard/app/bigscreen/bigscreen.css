@@ -618,3 +618,56 @@
 .bs-cmd .bs-box.bs-ev .bs-bt { background: var(--nv-red); border-bottom-color: #ffffff; }
 .bs-cmd .bs-box.bs-ev .bs-bt span, .bs-cmd .bs-box.bs-ev .bs-bt em { color: #0b0805; }
 .bs-cmd .bs-box.bs-ev .bs-bt i { background: #0b0805; }
+
+/* ══ 作戰指揮：私有素材的位置（2026-09-13）══
+   User 回報「素材很多都沒用」，所以這一輪把貼紙、徽章、人物、背景都放到畫面上。
+   原則：**素材不能蓋掉數字**——尺寸小、透明度壓過、只放在面板的空白角落。
+   每一項都是「有檔才出現」，公開版沒有素材時版面完全正常。 */
+
+/* 舞台背景圖：鋪滿、壓很淡；面板改成半透明，所以整個畫面都帶著底圖的質地 */
+.bs-cmd .bs-bgmark {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  z-index: 0; opacity: 0.11; filter: saturate(0.85) contrast(1.05); pointer-events: none;
+}
+.bs-cmd .bs-box { background: rgba(11, 8, 5, 0.88); }
+.bs-cmd .bs-counter { background: rgba(11, 8, 5, 0.9); }
+
+/* 面板標題列右端的小標 */
+.bs-cmd .bs-bt-decal { height: 18px; width: auto; margin-left: 10px; opacity: 0.8; flex: none; }
+/* 說明文字與小標會互相壓到（2026-09-13 看圖發現）——文字太長就截斷，標不要被擠掉 */
+.bs-cmd .bs-bt em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* 翻牌框右下角的小標 */
+.bs-cmd .bs-ct-decal { position: absolute; right: 10px; top: 36px; height: 17px; width: auto; opacity: 0.5; }
+
+/* 側邊直排字：上面各掛一個小標 */
+.bs-cmd .bs-edge { display: flex; flex-direction: column; align-items: center; gap: 14px; top: 104px; }
+.bs-cmd .bs-edge img { width: 26px; height: auto; opacity: 0.75; writing-mode: horizontal-tb; }
+.bs-cmd .bs-edge span { writing-mode: vertical-rl; text-orientation: upright; }
+
+/* 警戒橫幅：左右各一個小標，中間是文字 */
+.bs-cmd .bs-alarm { gap: 14px; }
+.bs-cmd .bs-alarm img { height: 20px; width: auto; opacity: 0.9; }
+.bs-cmd .bs-alarm.on img { filter: brightness(0.2); }
+.bs-cmd .bs-alarm b { font-weight: 900; letter-spacing: 0.3em; }
+
+/* 拓撲：中央徽章（在「閘道」牌子後面）、右上小標、左下人物 */
+.bs-cmd .bs-hubmark {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 300px; height: auto; z-index: 0; opacity: 0.34; pointer-events: none;
+}
+.bs-cmd .bs-topo-secret { position: absolute; right: 16px; top: 12px; height: 34px; width: auto; z-index: 2; opacity: 0.6; }
+.bs-cmd .bs-char {
+  position: absolute; left: 10px; bottom: 0; height: 46%; width: auto; z-index: 1;
+  opacity: 0.55; pointer-events: none;
+  -webkit-mask-image: linear-gradient(to top, transparent, #000 28%);
+  mask-image: linear-gradient(to top, transparent, #000 28%);
+}
+
+/* 畫面最下方的一個標（在警戒條紋上方） */
+.bs-cmd .bs-botmark {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  height: 22px; width: auto; z-index: 5; opacity: 0.5;
+}
+
+/* 頁首的標誌圖：兩種扁平外觀都用 */
+.bs-nerv .bs-emblem-img img { height: 58px; }

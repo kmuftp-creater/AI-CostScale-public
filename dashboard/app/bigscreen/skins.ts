@@ -27,6 +27,39 @@ export const SKIN_CLASS: Record<Skin, string[]> = {
   cmd: ["bs-nerv", "bs-cmd"],
 };
 
+/**
+ * 私有素材的插槽。`public/private/<名稱>.png|jpg|jpeg|webp` 放了檔就會出現在對應位置。
+ *
+ * 為什麼用「固定名稱」而不是「掃描目錄」：位置是設計過的（哪個標貼哪一塊），
+ * 用檔名對應，之後想換某一塊只要換那個檔，不必改程式。
+ * 這個目錄在 .gitignore 裡——素材不進版控，公開版一個都不會有，版面照樣完整。
+ */
+export const ASSET_SLOTS = [
+  "logo",      // 頁首左上的標誌
+  "mark",      // 整個舞台的背景圖（壓很淡）
+  "char",      // 拓撲面板左下的人物剪影
+  "nerv",      // 拓撲中央「閘道」後面的徽章
+  "nervleaf",  // 左側直排字上方的小標
+  "secret2",   // 右側直排字上方的小標
+  "alarm",     // 警戒橫幅左端
+  "sortie",    // 警戒橫幅右端
+  "secret",    // 拓撲面板右上角
+  "internal",  // 每日閘道花費
+  "eva01",     // 模型用量
+  "power",     // 免費額度
+  "eva02",     // 流量拓撲
+  "eva00",     // 近 24 小時
+  "agency",    // 軟體費用排行
+  "plan",      // 訂閱省下多少
+  "berserk",   // 最近異常
+  "weapon",    // 畫面最下方
+  "unit01",    // 本月呼叫
+  "unit02",    // 本月 Token
+  "unit03",    // 本月閘道花費
+] as const;
+export type AssetSlot = (typeof ASSET_SLOTS)[number];
+export type Assets = Partial<Record<AssetSlot, string>>;
+
 /** 網址參數是不是合法的外觀名稱。 */
 export function parseSkin(v: string | undefined | null): Skin | null {
   return v === "cyber" || v === "nerv" || v === "cmd" ? v : null;

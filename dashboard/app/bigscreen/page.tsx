@@ -3,7 +3,7 @@ import path from "node:path";
 import { Orbitron } from "next/font/google";
 import { getBigScreenData } from "@/lib/bigscreen";
 import BigScreenClient from "./BigScreenClient";
-import { SKIN_CLASS, parseSkin } from "./skins";
+import { SKIN_CLASS, parseSkin, ASSET_SLOTS, type Assets } from "./skins";
 import "./bigscreen.css";
 
 export const dynamic = "force-dynamic";
@@ -41,11 +41,21 @@ function findAsset(base: string) {
   return null;
 }
 
+/** 每個插槽找一次檔案。沒放的插槽就不會出現在畫面上。 */
+function collectAssets(): Assets {
+  const out: Assets = {};
+  for (const slot of ASSET_SLOTS) {
+    const url = findAsset(slot);
+    if (url) out[slot] = url;
+  }
+  return out;
+}
+
 export default async function BigScreenPage({ searchParams }: { searchParams: Promise<{ skin?: string }> }) {
   const sp = await searchParams;
   const urlSkin = parseSkin(sp.skin);
   const data = await getBigScreenData();
-  const assets = { logo: findAsset("logo"), mark: findAsset("mark") };
+  const assets = collectAssets();
   return (
     <div className={`bs ${urlSkin ? SKIN_CLASS[urlSkin].join(" ") : ""} ${orbitron.variable}`}>
       {/* 把 next/font 產生的真實字型名稱傳下去給 ECharts。ECharts 量字寬用 canvas，
