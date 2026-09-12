@@ -52,6 +52,8 @@ const SKINS = {
     idle: "#3a4a72",
     line: "#f1edff",
     apps: null as string[] | null,
+    // flat＝扁平：不用漸層、不用光暈、節點用方塊。第二種外觀的造型靠它，不只是換色。
+    flat: false,
     C: { cy: "#22d3ee", good: "#2ee6a6", warn: "#ffb72b", crit: "#ff4d5e", ink: "#e2f1ff", ink2: "#a3c0ea", muted: "#6484b8", grid: "rgba(47,123,255,0.18)" },
     tip: { bg: "rgba(4,20,60,0.94)", border: "#1f6ad8" },
     daily: ["#4b88fd", "#22d3ee", "#9a85ff"],
@@ -70,14 +72,15 @@ const SKINS = {
   },
   nerv: {
     ramp: ["#ffd9a8", "#ffb056", "#f2801a", "#b85500"],
-    hub: "#f2801a",
-    fail: "#ff3b30",
+    hub: "#ff6a00",
+    fail: "#ff1f0f",
     gray: "#6f6a5c",
     idle: "#43403a",
     line: "#ffe9c7",
     apps: ["#d4640c", "#0f9c84", "#bb8d16", "#cf4540", "#7d6ad9", "#7f9234"] as string[] | null,
-    C: { cy: "#ff7a18", good: "#7ee787", warn: "#ffcc00", crit: "#ff3b30", ink: "#f3ecdc", ink2: "#cbbfa5", muted: "#8d836e", grid: "rgba(255,122,24,0.16)" },
-    tip: { bg: "rgba(12,8,4,0.95)", border: "#ff7a18" },
+    flat: true,
+    C: { cy: "#ff6a00", good: "#7ee787", warn: "#ffcc00", crit: "#ff1f0f", ink: "#f6ead8", ink2: "#c8b79c", muted: "#8a7c66", grid: "rgba(255,106,0,0.18)" },
+    tip: { bg: "#0b0805", border: "#ff6a00" },
     daily: ["#b85500", "#ff7a18", "#ffcc00"],
     dailyGlow: "rgba(255,122,24,0.55)",
     dailyArea: ["rgba(255,122,24,0.40)", "rgba(255,122,24,0.10)", "rgba(255,122,24,0)"],
@@ -90,7 +93,8 @@ const SKINS = {
     gaugeTick: "rgba(126,231,135,0.35)",
     modelWord: "橘",
     head: { g1: "#c24a00", g2: "#160a03", edge: "#ff7a18", rail: "#8a4a10", l1: "#ff7a18", l2: "#ffe9c7", l3: "#7ee787", flow: "#ffd9a8", chipA: "#ff7a18", chipB: "#ffcc00", chipC: "#7ee787" },
-    acc: { daily: "#ff7a18", mix: "#ffb056", free: "#7ee787", calls: "#ff7a18", tokens: "#7ee787", spend: "#ffcc00", topo: "#f2801a", hour: "#7ee787", rank: "#ffcc00", save: "#7ee787", events: "#ff3b30" },
+    // 紅色留給「有事」的那幾塊：異常、失敗、告警（2026-09-12 User：「而且沒有紅色」）
+    acc: { daily: "#ff7a18", mix: "#ffb056", free: "#7ee787", calls: "#ff6a00", tokens: "#7ee787", spend: "#ffcc00", topo: "#f2801a", hour: "#7ee787", rank: "#ffcc00", save: "#7ee787", events: "#ff1f0f" },
   },
 } as const;
 
@@ -101,8 +105,63 @@ const tint = (hex: string, t: number) => {
 };
 const fmtInt = (n: number) => Math.round(n).toLocaleString("en-US");
 
+/**
+ * 七段式數字（電子碼表那種）。2026-09-12 User 指定：「電子碼表格式阿」。
+ *
+ * 沒亮的段也畫出來、只是很暗——真的液晶顯示器就是這樣，全黑反而像印刷字。
+ * 七段顯示器是通用的工業零件造型，不屬於任何作品。
+ */
+const SEG_SHAPES: Record<string, string> = {
+  a: "8,2 52,2 46,10 14,10",
+  b: "54,4 58,10 58,46 52,50 48,44 48,12",
+  c: "58,54 58,90 54,96 48,88 48,56 52,50",
+  d: "52,98 8,98 14,90 46,90",
+  e: "2,54 2,90 6,96 12,88 12,56 8,50",
+  f: "6,4 2,10 2,46 8,50 12,44 12,12",
+  g: "14,46 46,46 52,50 46,54 14,54 8,50",
+};
+const SEG_ON: Record<string, string> = {
+  "0": "abcdef", "1": "bc", "2": "abged", "3": "abgcd", "4": "fgbc",
+  "5": "afgcd", "6": "afgecd", "7": "abc", "8": "abcdefg", "9": "abcdfg",
+};
+
+function SevenSeg({ ch }: { ch: string }) {
+  const on = SEG_ON[ch] ?? "";
+  return (
+    <svg className="bs-seg7" viewBox="0 0 60 100" aria-hidden="true">
+      {Object.entries(SEG_SHAPES).map(([k, pts]) => (
+        <polygon key={k} points={pts} className={on.includes(k) ? "on" : "off"} />
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * 徽章（只有黑橘警戒外觀會顯示）。六角形外框、裡面三個節點連成三角形、我們自己的字。
+ *
+ * **刻意不是任何作品裡的標誌**——那些有版權。這裡取的是「機構徽章」這個通用形式：
+ * 六角形＋三節點是很常見的圖解造型（三個節點對應這套系統的三段：軟體 → 閘道 → 模型）。
+ */
+function Emblem() {
+  return (
+    <div className="bs-emblem">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <polygon className="hex" points="60,3 111,33 111,87 60,117 9,87 9,33" />
+        <polygon className="tri" points="60,34 86,79 34,79" />
+        <g className="node">
+          <circle cx="60" cy="34" r="7" />
+          <circle cx="86" cy="79" r="7" />
+          <circle cx="34" cy="79" r="7" />
+        </g>
+        <circle className="core" cx="60" cy="64" r="4" />
+      </svg>
+      <span><b>閘道管制</b><i>GATEWAY CONTROL</i></span>
+    </div>
+  );
+}
+
 /** 翻牌數字。value 變了才捲；停止用經過的時間，不用跳動次數（背景分頁會放慢計時器）。 */
-function Digits({ value, still, prefix, suffix }: { value: string; still: boolean; prefix?: string; suffix?: string }) {
+function Digits({ value, still, prefix, suffix, seg }: { value: string; still: boolean; prefix?: string; suffix?: string; seg?: boolean }) {
   const [shown, setShown] = useState(value);
   useEffect(() => {
     if (still) { setShown(value); return; }
@@ -118,7 +177,9 @@ function Digits({ value, still, prefix, suffix }: { value: string; still: boolea
   return (
     <span className="bs-digits">
       {prefix ? <u>{prefix}</u> : null}
-      {shown.split("").map((c, i) => (/\d/.test(c) ? <b key={i}>{c}</b> : <s key={i}>{c}</s>))}
+      {shown.split("").map((c, i) =>
+        /\d/.test(c) ? (seg ? <SevenSeg key={i} ch={c} /> : <b key={i}>{c}</b>) : <s key={i}>{c}</s>
+      )}
       {suffix ? <u>{suffix}</u> : null}
     </span>
   );
@@ -257,10 +318,13 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
       xAxis: { type: "category", data: daily.map((d) => d.day), boundaryGap: false, axisLine: { lineStyle: { color: C.grid } }, axisTick: { show: false }, axisLabel: { color: C.muted, interval: 5, fontSize: 12 } },
       yAxis: { type: "value", max: Math.ceil(dMax * 1.15 * 10) / 10, splitNumber: 4, splitLine: { lineStyle: { color: C.grid, type: "dashed" } }, axisLabel: { color: C.muted, fontSize: 12, formatter: (v: number) => (v ? "$" + v.toFixed(2) : "0") } },
       series: [{
-        type: "line", smooth: true, showSymbol: false, data: daily.map((d) => d.usd),
-        lineStyle: { width: 2.5, color: new G(0, 0, 1, 0, [{ offset: 0, color: P.daily[0] }, { offset: 0.55, color: P.daily[1] }, { offset: 1, color: P.daily[2] }]), shadowColor: P.dailyGlow, shadowBlur: 12 },
+        type: "line", smooth: !P.flat, showSymbol: false, data: daily.map((d) => d.usd),
+        // 扁平外觀不用漸層、不用外光：那兩樣是另一種外觀的語彙
+        lineStyle: P.flat
+          ? { width: 2, color: P.daily[1] }
+          : { width: 2.5, color: new G(0, 0, 1, 0, [{ offset: 0, color: P.daily[0] }, { offset: 0.55, color: P.daily[1] }, { offset: 1, color: P.daily[2] }]), shadowColor: P.dailyGlow, shadowBlur: 12 },
         itemStyle: { color: C.cy },
-        areaStyle: { color: new G(0, 0, 0, 1, [{ offset: 0, color: P.dailyArea[0] }, { offset: 0.7, color: P.dailyArea[1] }, { offset: 1, color: P.dailyArea[2] }]) },
+        areaStyle: { color: P.flat ? P.dailyArea[0] : new G(0, 0, 0, 1, [{ offset: 0, color: P.dailyArea[0] }, { offset: 0.7, color: P.dailyArea[1] }, { offset: 1, color: P.dailyArea[2] }]) },
         markPoint: { symbol: "pin", symbolSize: 44, itemStyle: { color: C.warn }, label: { color: "#1a1200", fontSize: 11, fontWeight: 700, formatter: "高點" }, data: [{ type: "max" }] },
       }],
     }, true);
@@ -269,7 +333,7 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
     let mi = 0;
     const mix = data.models.map((m) => {
       const col = modelColor(m.name, m.kind, m.kind === "model" ? mi++ : 0);
-      return { name: m.name, value: m.calls, col, itemStyle: { color: new G(0, 0, 1, 1, [{ offset: 0, color: tint(col, 0.25) }, { offset: 1, color: col }]) } };
+      return { name: m.name, value: m.calls, col, itemStyle: { color: P.flat ? col : new G(0, 0, 1, 1, [{ offset: 0, color: tint(col, 0.25) }, { offset: 1, color: col }]) } };
     });
     init("mix")?.setOption({
       tooltip: { ...TIP, trigger: "item", formatter: (p: { name: string; value: number; percent: number }) => `${p.name}<br/><b>${fmtInt(p.value)} 次</b>（${p.percent}%）` },
@@ -292,7 +356,7 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
         return {
           type: "gauge", center: [`${pools.length === 1 ? 50 : 17 + i * (66 / Math.max(1, pools.length - 1))}%`, "50%"], radius: "56%",
           startAngle: 90, endAngle: -270, min: 0, max,
-          pointer: { show: false }, progress: { show: true, roundCap: true, width: 10, itemStyle: { color: new G(0, 0, 1, 1, [{ offset: 0, color: C.good }, { offset: 1, color: C.cy }]) } },
+          pointer: { show: false }, progress: { show: true, roundCap: !P.flat, width: 10, itemStyle: { color: P.flat ? C.good : new G(0, 0, 1, 1, [{ offset: 0, color: C.good }, { offset: 1, color: C.cy }]) } },
           axisLine: { lineStyle: { width: 10, color: [[1, P.gaugeTrack]] } },
           axisTick: { show: true, distance: -22, length: 4, splitNumber: 3, lineStyle: { color: P.gaugeTick } },
           splitLine: { show: false }, axisLabel: { show: false },
@@ -314,13 +378,13 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
     leftApps.forEach((a, i) => {
       const p = [8, yAt(i, leftApps.length)];
       const ac = colOf(a);
-      nodes.push({ name: a.name, value: p, symbolSize: a.calls ? 11 + Math.log10(a.calls + 1) * 5 : 8,
-        itemStyle: { color: a.idle ? P.idle : ac, borderColor: tint(ac, 0.5), borderWidth: 2, shadowBlur: a.calls ? 14 : 0, shadowColor: ac },
+      nodes.push({ name: a.name, value: p, symbol: P.flat ? "rect" : "circle", symbolSize: a.calls ? 11 + Math.log10(a.calls + 1) * 5 : 8,
+        itemStyle: { color: a.idle ? P.idle : ac, borderColor: P.flat ? "#0b0805" : tint(ac, 0.5), borderWidth: 2, shadowBlur: P.flat ? 0 : (a.calls ? 14 : 0), shadowColor: ac },
         label: { show: true, position: "left", distance: 10, color: a.calls ? C.ink : C.muted, fontSize: 13.5,
           formatter: `{n|${a.name}}  {c|${a.calls ? fmtInt(a.calls) : "閒置"}}`,
           rich: { n: { fontSize: 13.5 }, c: { fontFamily: numFont, fontSize: 12, color: a.calls ? tint(ac, 0.35) : C.muted } } } });
       if (a.calls) series.push({ type: "lines", coordinateSystem: "cartesian2d", zlevel: 1,
-        lineStyle: { curveness: 0.18, opacity: 0.8, width: w(a.calls), color: new G(0, 0, 1, 0, [{ offset: 0, color: ac }, { offset: 1, color: P.hub }]) },
+        lineStyle: { curveness: P.flat ? 0 : 0.18, opacity: P.flat ? 0.95 : 0.8, width: w(a.calls), color: P.flat ? ac : new G(0, 0, 1, 0, [{ offset: 0, color: ac }, { offset: 1, color: P.hub }]) },
         effect: { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: tint(ac, 0.55) },
         data: [{ coords: [p, hub], value: a.calls, name: a.name }] });
     });
@@ -329,14 +393,14 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
     data.models.forEach((m, i) => {
       const col = modelColor(m.name, m.kind, m.kind === "model" ? ri++ : 0);
       const p = [92, yAt(i, data.models.length)];
-      nodes.push({ name: m.name, value: p, symbolSize: 11 + Math.log10(m.calls + 1) * 5,
-        itemStyle: { color: col, shadowBlur: m.kind === "model" ? 14 : 0, shadowColor: col },
+      nodes.push({ name: m.name, value: p, symbol: P.flat ? "rect" : "circle", symbolSize: 11 + Math.log10(m.calls + 1) * 5,
+        itemStyle: { color: col, borderColor: P.flat ? "#0b0805" : col, borderWidth: P.flat ? 2 : 0, shadowBlur: P.flat ? 0 : (m.kind === "model" ? 14 : 0), shadowColor: col },
         label: { show: true, position: "right", distance: 10, color: m.kind === "other" ? C.muted : C.ink, fontSize: 13.5,
           formatter: `{c|${fmtInt(m.calls)}}  {n|${m.name}}`,
           rich: { n: { fontSize: 13.5 }, c: { fontFamily: numFont, fontSize: 12, color: col } } } });
-      mLines.push({ coords: [hub, p], value: m.calls, name: m.name, lineStyle: { width: w(m.calls), color: new G(0, 0, 1, 0, [{ offset: 0, color: P.hub }, { offset: 1, color: col }]) } });
+      mLines.push({ coords: [hub, p], value: m.calls, name: m.name, lineStyle: { width: w(m.calls), color: P.flat ? col : new G(0, 0, 1, 0, [{ offset: 0, color: P.hub }, { offset: 1, color: col }]) } });
     });
-    series.push({ type: "lines", coordinateSystem: "cartesian2d", zlevel: 1, lineStyle: { curveness: 0.18, opacity: 0.7 },
+    series.push({ type: "lines", coordinateSystem: "cartesian2d", zlevel: 1, lineStyle: { curveness: P.flat ? 0 : 0.18, opacity: P.flat ? 0.9 : 0.7 },
       effect: { show: !still, period: 3.2, trailLength: 0.4, symbol: "circle", symbolSize: 5, color: P.line }, data: mLines });
     series.push({ type: "scatter", coordinateSystem: "cartesian2d", zlevel: 2, data: nodes });
     init("topo")?.setOption({
@@ -360,9 +424,11 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
       yAxis: { type: "value", max: Math.ceil(hMax * 1.25), splitNumber: 4, splitLine: { lineStyle: { color: C.grid, type: "dashed" } }, axisLabel: { color: C.muted, fontSize: 12 } },
       series: [{
         type: "bar", barWidth: 16,
-        data: hours.map((v, h) => ({ value: v, itemStyle: { color: h === peakH && v > 0
-          ? new G(0, 0, 0, 1, [{ offset: 0, color: P.hourPeak[0] }, { offset: 1, color: P.hourPeak[1] }])
-          : new G(0, 0, 0, 1, [{ offset: 0, color: P.hourBar[0] }, { offset: 0.5, color: P.hourBar[1] }, { offset: 1, color: P.hourBar[2] }]) } })),
+        data: hours.map((v, h) => ({ value: v, itemStyle: { color: P.flat
+          ? (h === peakH && v > 0 ? P.hourPeak[0] : P.hourBar[1])
+          : (h === peakH && v > 0
+            ? new G(0, 0, 0, 1, [{ offset: 0, color: P.hourPeak[0] }, { offset: 1, color: P.hourPeak[1] }])
+            : new G(0, 0, 0, 1, [{ offset: 0, color: P.hourBar[0] }, { offset: 0.5, color: P.hourBar[1] }, { offset: 1, color: P.hourBar[2] }])) } })),
         label: { show: true, position: "top", color: C.ink2, fontSize: 11, formatter: (p: { dataIndex: number; value: number }) => (p.dataIndex === peakH && p.value > 0 ? "高峰 " + p.value : "") },
       }],
     }, true);
@@ -384,7 +450,9 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
             formatter: (p: { dataIndex: number }) => { const v = spend[p.dataIndex].spendUsd; return `{v|US$${v.toFixed(2)}}  {t|≈NT$${fmtInt(v * FX)}}`; },
             rich: { v: { color: "#ffffff", fontFamily: numFont, fontSize: 13, fontWeight: 600 }, t: { color: C.warn, fontSize: 12 } } } },
         { type: "bar", barWidth: 12, data: spend.map((s) => ({ value: s.spendUsd,
-          itemStyle: { color: new G(0, 0, 1, 0, [{ offset: 0, color: colOf(s) }, { offset: 1, color: tint(colOf(s), 0.45) }]), shadowColor: colOf(s), shadowBlur: 8 } })) },
+          itemStyle: P.flat
+            ? { color: colOf(s) }
+            : { color: new G(0, 0, 1, 0, [{ offset: 0, color: colOf(s) }, { offset: 1, color: tint(colOf(s), 0.45) }]), shadowColor: colOf(s), shadowBlur: 8 } })) },
       ],
     }, true);
     };
@@ -431,6 +499,7 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
               <rect x="1386" y="10" width="14" height="6" transform="skewX(35)" fill={P.head.chipB} />
               <rect x="1404" y="10" width="22" height="6" transform="skewX(35)" fill={P.head.chipC} />
             </svg>
+            {P.flat ? <Emblem /> : null}
             <div className="bs-sub-l"><span>{dateLabel}</span><span>AI 用量與成本</span></div>
             <h1>CostScale AI 閘道營運大屏</h1>
             <div className="bs-sub-r">
@@ -472,17 +541,17 @@ export default function BigScreenClient({ data, numFont, initialSkin }: { data: 
             <div className="bs-counters">
               <section className="bs-box bs-counter" style={{ "--acc": A.calls } as React.CSSProperties}>
                 <span className="bs-lab">本月呼叫</span>
-                <Digits value={fmtInt(data.month.calls)} still={still} suffix="次" />
+                <Digits value={fmtInt(data.month.calls)} still={still} suffix="次" seg={P.flat} />
                 <span className="bs-alt">失敗 <b>{fmtInt(data.month.failed)}</b> 次（{data.month.calls ? ((data.month.failed / data.month.calls) * 100).toFixed(1) : "0"}%）</span>
               </section>
               <section className="bs-box bs-counter" style={{ "--acc": A.tokens } as React.CSSProperties}>
                 <span className="bs-lab">本月 Token</span>
-                <Digits value={fmtInt(data.month.tokens)} still={still} />
+                <Digits value={fmtInt(data.month.tokens)} still={still} seg={P.flat} />
                 <span className="bs-alt">經閘道的部分</span>
               </section>
               <section className="bs-box bs-counter" style={{ "--acc": A.spend } as React.CSSProperties}>
                 <span className="bs-lab">本月閘道花費</span>
-                <Digits value={data.month.spendUsd.toFixed(2)} still={still} prefix="US$" />
+                <Digits value={data.month.spendUsd.toFixed(2)} still={still} prefix="US$" seg={P.flat} />
                 <span className="bs-alt">約 <b>NT${fmtInt(data.month.spendUsd * FX)}</b> · 匯率 {FX.toFixed(2)}{data.fx.stale ? "（匯率超過兩天沒更新）" : ""}</span>
               </section>
             </div>

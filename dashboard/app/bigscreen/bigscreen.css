@@ -243,104 +243,224 @@
 /* 翻牌數字的三個框不跑邊框流光：框太扁，光轉到短邊時會一下跳過去，看起來像在閃（2026-09-12 User 回報）。 */
 .bs-counter::after { display: none; }
 
-/* ══ 外觀二：黑橘警戒（2026-09-12，User 要「新世紀福音戰士」那種感覺）══
-   取的是那種指揮所的視覺語言——黑底、橘色警戒條、稜角切邊、綠色終端字。
-   **不使用作品裡的標誌、名稱或任何美術資產**，只有配色與造型語彙。
-   版面、元件、資料完全共用第一種外觀，這裡只換 CSS 變數與少數造型。 */
+/* ══ 外觀二：黑橘警戒（2026-09-12；2026-09-12 第二版，改的是造型不只是顏色）══
+   第一版只把配色換成橘色，User 回報「那不是那種風格，你只是把橘色調加上去而已」。
+   那種指揮所畫面的重點不在顏色，在**造型**：
+
+     1. 全部扁平——沒有漸層、沒有光暈、沒有圓角、沒有流光動畫。
+     2. 反白色塊——標題列與數字框是「橘底黑字」，不是深底亮字。
+     3. 粗框與四角括號，框線 2px 實線，直角。
+     4. 警戒斜條紋（黑橘 45 度）當分隔帶。
+     5. 粗黑體、字距拉很開（0.3em 以上）。
+     6. 十字準線與同心圓準星，取代原本的全息投影台。
+     7. 節點是方塊不是圓點（圖表那側在 BigScreenClient 依 P.flat 切換）。
+
+   **不使用任何作品裡的標誌、名稱或美術資產**，只有上面這幾條造型語彙。
+   版面、元件、資料與第一種外觀完全共用。 */
 .bs-nerv {
-  --bs-bg: #08060a;
-  --bs-bg-2: #1a0f05;
-  --bs-panel: rgba(30, 17, 6, 0.55);
-  --bs-frame: rgba(255, 122, 24, 0.45);
-  --bs-cy: #ff7a18;
-  --bs-ink: #f3ecdc;
-  --bs-ink-2: #cbbfa5;
-  --bs-muted: #8d836e;
+  --bs-bg: #070603;
+  --bs-bg-2: #120a04;
+  --bs-panel: #0b0805;
+  --bs-frame: #ff6a00;
+  --bs-cy: #ff6a00;
+  --bs-ink: #f6ead8;
+  --bs-ink-2: #c8b79c;
+  --bs-muted: #8a7c66;
   --bs-good: #7ee787;
   --bs-warn: #ffcc00;
-  --bs-crit: #ff3b30;
+  --bs-crit: #ff2d16;
+  --nv: #ff6a00;
+  --nv-dark: #0b0805;
+  --nv-stripe: repeating-linear-gradient(45deg, #ff6a00 0 12px, #0b0805 12px 24px);
 }
 
-/* 舞台：拿掉藍紫星雲，改成黑底＋橘色掃描線與網格 */
+/* ── 舞台：純黑、細掃描線、十字準線、四角括號 ── */
 .bs-nerv .bs-stage {
   background:
-    repeating-linear-gradient(0deg, rgba(255, 122, 24, 0.045) 0 1px, transparent 1px 4px),
-    radial-gradient(ellipse 46% 42% at 50% 52%, rgba(255, 122, 24, 0.20), transparent 70%),
-    radial-gradient(ellipse 30% 30% at 14% 78%, rgba(255, 204, 0, 0.10), transparent 70%),
-    radial-gradient(ellipse 30% 28% at 84% 72%, rgba(126, 231, 135, 0.08), transparent 70%),
-    linear-gradient(rgba(255, 122, 24, 0.06) 1px, transparent 1px) 0 0 / 48px 48px,
-    linear-gradient(90deg, rgba(255, 122, 24, 0.06) 1px, transparent 1px) 0 0 / 48px 48px,
-    linear-gradient(180deg, var(--bs-bg-2), var(--bs-bg) 55%);
+    repeating-linear-gradient(0deg, rgba(255, 106, 0, 0.05) 0 1px, transparent 1px 4px),
+    linear-gradient(rgba(255, 106, 0, 0.22) 1px, transparent 1px) 0 50% / 100% 1px no-repeat,
+    linear-gradient(90deg, rgba(255, 106, 0, 0.22) 1px, transparent 1px) 50% 0 / 1px 100% no-repeat,
+    linear-gradient(180deg, var(--bs-bg-2), var(--bs-bg) 45%);
 }
-/* 掃描光改橘 */
-.bs-nerv .bs-stage::after {
-  background: linear-gradient(180deg, transparent, rgba(255, 122, 24, 0.06) 60%, rgba(255, 200, 140, 0.20) 97%, transparent);
-}
-/* 底部警戒條紋：整個畫面最像「那種指揮所」的一筆 */
+/* 取消掃描光：那是發光效果，這個外觀不用 */
+.bs-nerv .bs-stage::after { display: none; }
+/* 底部警戒條紋 */
 .bs-nerv .bs-stage::before {
-  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 12px; z-index: 6; pointer-events: none;
-  background: repeating-linear-gradient(45deg, #ff7a18 0 16px, #0a0705 16px 32px);
-  opacity: 0.55;
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 14px; z-index: 6; pointer-events: none;
+  background: var(--nv-stripe);
 }
 
-/* 標題：不要漸層填字，改成實心橘＋外光 */
+/* ── 標題列 ── */
 .bs-nerv .bs-head h1 {
-  background: none; color: #ff7a18; -webkit-text-fill-color: #ff7a18;
-  letter-spacing: 0.30em; font-weight: 900;
-  filter: drop-shadow(0 0 14px rgba(255, 122, 24, 0.55));
+  background: none; color: var(--nv); -webkit-text-fill-color: var(--nv);
+  font-weight: 900; letter-spacing: 0.42em; filter: none;
 }
-.bs-nerv .bs-clock { color: #7ee787; text-shadow: 0 0 10px rgba(126, 231, 135, 0.55); }
+/* 標題底下再壓一條警戒帶 */
+.bs-nerv .bs-head::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 84px; height: 8px; background: var(--nv-stripe); opacity: 0.9;
+}
+.bs-nerv .bs-sub-l, .bs-nerv .bs-sub-r { letter-spacing: 0.16em; }
+/* 時鐘：綠底黑字的終端機字條 */
+.bs-nerv .bs-clock {
+  color: var(--nv-dark); background: var(--bs-good); padding: 1px 10px;
+  text-shadow: none; letter-spacing: 0.12em;
+}
+.bs-nerv .bs-ok, .bs-nerv .bs-bad { letter-spacing: 0.14em; }
+.bs-nerv .bs-dot { box-shadow: none; border-radius: 0; width: 8px; height: 8px; }
+.bs-nerv .bs-tools-l { letter-spacing: 0.08em; }
 
-/* 面板：右下切角，邊框橘色，標題字距拉開 */
+/* ── 面板：直角粗框、扁平、四角括號、橘底黑字的標題列 ── */
 .bs-nerv .bs-box {
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%);
-  box-shadow: inset 0 0 40px rgba(255, 122, 24, 0.10);
+  border: 2px solid var(--nv);
+  border-radius: 0;
+  background: var(--nv-dark);
+  box-shadow: none;
+  clip-path: none;
 }
-.bs-nerv .bs-bt { border-bottom-color: color-mix(in srgb, var(--acc) 55%, transparent); }
-.bs-nerv .bs-bt span { letter-spacing: 0.18em; }
-.bs-nerv .bs-hud { color: #7ee787; }
-.bs-nerv .bs-ticks { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--acc) 80%, transparent) 0 5px, transparent 5px 10px); }
-/* 切角會把右下角的角標切掉，補一條橘線回去 */
+/* 邊框流光拿掉（會發光、會轉，兩者都不屬於這個外觀） */
+.bs-nerv .bs-box::after { display: none; }
+/* 四角括號 */
 .bs-nerv .bs-box::before {
-  content: ""; position: absolute; right: -1px; bottom: -1px; width: 24px; height: 24px; z-index: 3; pointer-events: none;
-  background: linear-gradient(45deg, var(--acc) 0 2px, transparent 2px);
-}
-
-/* 拓撲的投影台：藍紫改橘綠 */
-.bs-nerv .bs-floor {
+  content: ""; position: absolute; inset: 5px; z-index: 3; pointer-events: none;
   background:
-    linear-gradient(rgba(255, 122, 24, 0.45) 1px, transparent 1px) 0 0 / 100% 38px,
-    linear-gradient(90deg, rgba(126, 231, 135, 0.22) 1px, transparent 1px) 0 0 / 46px 100%;
+    linear-gradient(var(--nv), var(--nv)) left top / 16px 3px no-repeat,
+    linear-gradient(var(--nv), var(--nv)) left top / 3px 16px no-repeat,
+    linear-gradient(var(--nv), var(--nv)) right top / 16px 3px no-repeat,
+    linear-gradient(var(--nv), var(--nv)) right top / 3px 16px no-repeat,
+    linear-gradient(var(--nv), var(--nv)) left bottom / 16px 3px no-repeat,
+    linear-gradient(var(--nv), var(--nv)) left bottom / 3px 16px no-repeat,
+    linear-gradient(var(--nv), var(--nv)) right bottom / 16px 3px no-repeat,
+    linear-gradient(var(--nv), var(--nv)) right bottom / 3px 16px no-repeat;
+  opacity: 0.85;
 }
-.bs-nerv .bs-holo .d1 { background: repeating-conic-gradient(rgba(255, 122, 24, 0.85) 0 1.2deg, transparent 1.2deg 10deg); }
-.bs-nerv .bs-holo .d2 {
-  border-top-color: #ff7a18; border-right-color: #ffcc00; border-bottom-color: rgba(126, 231, 135, 0.9);
-  box-shadow: 0 0 22px rgba(255, 122, 24, 0.45);
+.bs-nerv .bs-bt {
+  background: var(--nv);
+  border-bottom: 0;
+  padding: 0 14px;
 }
-.bs-nerv .bs-holo .d3 { background: radial-gradient(circle, rgba(255, 122, 24, 0.5), rgba(255, 204, 0, 0.10) 60%, transparent 70%); }
-.bs-nerv .bs-beam { background: linear-gradient(to top, rgba(255, 122, 24, 0.5), rgba(255, 122, 24, 0)); }
-.bs-nerv .bs-core { background: radial-gradient(circle, rgba(255, 122, 24, 0.42), rgba(255, 204, 0, 0.08) 60%, transparent 70%); }
-.bs-nerv .bs-hub b { text-shadow: 0 0 14px rgba(255, 122, 24, 0.95); }
-.bs-nerv .bs-hub small { color: #ffcc00; }
+.bs-nerv .bs-bt i { background: var(--nv-dark); box-shadow: none; transform: none; width: 12px; height: 12px; }
+.bs-nerv .bs-bt span { color: var(--nv-dark); font-weight: 900; letter-spacing: 0.3em; }
+.bs-nerv .bs-bt em { color: rgba(11, 8, 5, 0.72); letter-spacing: 0.1em; }
+.bs-nerv .bs-foot { padding: 0 10px 0 18px; }
+.bs-nerv .bs-hud { color: var(--nv); letter-spacing: 0.22em; }
+.bs-nerv .bs-ticks { width: 120px; height: 8px; background: var(--nv-stripe); opacity: 0.8; }
 
-/* 訂閱省下多少 */
+/* ── 翻牌數字：橘底黑字，整塊反白 ── */
+.bs-nerv .bs-counter { background: var(--nv); border: 2px solid var(--nv); }
+.bs-nerv .bs-counter .bs-lab { color: var(--nv-dark); font-weight: 900; letter-spacing: 0.34em; }
+.bs-nerv .bs-digits { gap: 0; }
+.bs-nerv .bs-digits b {
+  background: none; border: 0; box-shadow: none; text-shadow: none;
+  color: var(--nv-dark); font-size: 42px; width: 27px; height: 48px;
+}
+.bs-nerv .bs-digits s { color: var(--nv-dark); font-size: 40px; }
+.bs-nerv .bs-digits u { color: rgba(11, 8, 5, 0.8); font-weight: 700; letter-spacing: 0.1em; }
+.bs-nerv .bs-alt { color: rgba(11, 8, 5, 0.85); letter-spacing: 0.06em; }
+.bs-nerv .bs-alt b { color: var(--nv-dark); }
+
+/* ── 拓撲：十字準線＋同心圓準星，取代全息投影台 ── */
+.bs-nerv .bs-floor { display: none; }
+.bs-nerv .bs-beam { display: none; }
+.bs-nerv .bs-core { display: none; }
+.bs-nerv .bs-holo span {
+  transform: translate(-50%, -50%);
+  animation: none; box-shadow: none; background: none; border-radius: 50%;
+}
+.bs-nerv .bs-holo { top: 50%; }
+.bs-nerv .bs-holo .d1 { width: 330px; height: 330px; border: 1px dashed rgba(255, 106, 0, 0.55); }
+.bs-nerv .bs-holo .d2 { width: 232px; height: 232px; border: 2px solid var(--nv); }
+.bs-nerv .bs-holo .d3 { width: 120px; height: 120px; border: 1px solid rgba(126, 231, 135, 0.65); }
+/* 貫穿整塊的十字準線 */
+.bs-nerv .bs-topo .bs-bc::after {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    linear-gradient(rgba(255, 106, 0, 0.30) 1px, transparent 1px) 0 50% / 100% 1px no-repeat,
+    linear-gradient(90deg, rgba(255, 106, 0, 0.30) 1px, transparent 1px) 50% 0 / 1px 100% no-repeat;
+}
+.bs-nerv .bs-hub b {
+  background: var(--nv); color: var(--nv-dark); padding: 2px 14px;
+  font-weight: 900; letter-spacing: 0.3em; text-shadow: none;
+}
+.bs-nerv .bs-hub small { color: var(--nv); letter-spacing: 0.08em; }
+.bs-nerv .bs-legend { letter-spacing: 0.08em; }
+
+/* ── 訂閱省下多少：扁平橘綠條 ── */
 .bs-nerv .bs-big strong {
-  background: linear-gradient(90deg, #ff7a18, #ffcc00);
-  filter: drop-shadow(0 0 10px rgba(255, 122, 24, 0.45));
+  background: none; color: var(--bs-good); -webkit-text-fill-color: var(--bs-good); filter: none;
+  letter-spacing: 0.04em;
 }
-.bs-nerv .bs-srow .tr { background: rgba(255, 122, 24, 0.12); border-color: rgba(255, 122, 24, 0.30); }
-.bs-nerv .bs-srow .tr.api i { background: linear-gradient(90deg, #7ee787, #ffcc00); box-shadow: 0 0 8px rgba(126, 231, 135, 0.5); }
-.bs-nerv .bs-srow .tr.fee i { background: #ff7a18; }
-.bs-nerv .bs-srow .v.fee { color: #ff7a18; }
+.bs-nerv .bs-srow .nm { letter-spacing: 0.1em; }
+.bs-nerv .bs-srow .tr { background: rgba(255, 106, 0, 0.10); border: 1px solid rgba(255, 106, 0, 0.35); }
+.bs-nerv .bs-srow .tr.api i { background: var(--bs-good); box-shadow: none; }
+.bs-nerv .bs-srow .tr.fee i { background: var(--nv); }
+.bs-nerv .bs-srow .v.fee { color: var(--nv); }
 
-/* 最近異常 */
-.bs-nerv .bs-events li { border-bottom-color: rgba(255, 122, 24, 0.25); }
-.bs-nerv .bs-events time { color: #7ee787; }
+/* ── 最近異常：等寬時間、方塊嚴重度標記 ── */
+.bs-nerv .bs-events li { border-bottom: 1px solid rgba(255, 106, 0, 0.22); letter-spacing: 0.03em; }
+.bs-nerv .bs-events time { color: var(--bs-good); letter-spacing: 0.08em; }
+.bs-nerv .bs-events .sv { transform: none; box-shadow: none; width: 9px; height: 9px; }
 
-/* 頁首的按鈕與切換 */
-.bs-nerv .bs-seg { border-color: rgba(255, 122, 24, 0.6); background: rgba(30, 17, 6, 0.6); }
-.bs-nerv .bs-seg button + button { border-left-color: rgba(255, 122, 24, 0.4); }
-.bs-nerv .bs-seg button[aria-pressed="true"] { background: rgba(255, 122, 24, 0.20); color: #ff7a18; }
-.bs-nerv .bs-btn { border-color: rgba(255, 122, 24, 0.6); background: rgba(30, 17, 6, 0.6); }
+/* ── 頁首右上的按鈕群：直角、橘框 ── */
+.bs-nerv .bs-seg { border: 1px solid var(--nv); background: var(--nv-dark); }
+.bs-nerv .bs-seg-lab { color: var(--bs-ink-2); letter-spacing: 0.14em; }
+.bs-nerv .bs-seg button + button { border-left: 1px solid rgba(255, 106, 0, 0.45); }
+.bs-nerv .bs-seg button[aria-pressed="true"] { background: var(--nv); color: var(--nv-dark); font-weight: 700; }
+.bs-nerv .bs-btn { border: 1px solid var(--nv); background: var(--nv-dark); letter-spacing: 0.08em; }
+.bs-nerv .bs-btn:hover, .bs-nerv .bs-seg button:hover { background: rgba(255, 106, 0, 0.18); color: #ffffff; }
+.bs-nerv .bs-warn-chip { border-radius: 0; border: 1px solid var(--bs-warn); }
+.bs-nerv .bs-note { letter-spacing: 0.1em; }
+
 /* 風格鈕：兩種外觀都看得出它是「會換東西」的那顆 */
 .bs-skin { letter-spacing: 0.06em; }
+
+/* ══ 黑橘警戒 第三版（2026-09-12）══
+   User 回報三件：要有「那種徽章」、數字要「電子碼表格式」、「而且沒有紅色」。
+   徽章是**原創**的（六角形＋三節點三角＋我們自己的字），不複製任何作品裡的標誌。 */
+.bs-nerv { --nv-red: #ff1f0f; }
+
+/* 標題帶下面壓一條紅線 */
+.bs-nerv .bs-head::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 94px; height: 3px;
+  background: var(--nv-red); opacity: 0.9;
+}
+/* 左上徽章；原本的日期與說明往右讓位 */
+.bs-nerv .bs-emblem { position: absolute; left: 34px; top: 6px; display: flex; align-items: center; gap: 12px; z-index: 4; }
+/* 頁首本來有一條 .bs-head svg { position: absolute; inset: 0 } 給背景那張用的，
+   徽章的 svg 會被它吃掉（整片攤開、文字疊上來），所以這裡要收回來。 */
+.bs-nerv .bs-emblem svg { position: static; inset: auto; width: 64px; height: 64px; flex: none; }
+.bs-nerv .bs-emblem .hex { fill: none; stroke: var(--nv); stroke-width: 5; }
+.bs-nerv .bs-emblem .tri { fill: rgba(255, 106, 0, 0.14); stroke: var(--nv); stroke-width: 3; }
+.bs-nerv .bs-emblem .node circle { fill: var(--nv); }
+.bs-nerv .bs-emblem .core { fill: var(--nv-red); }
+.bs-nerv .bs-emblem span { display: grid; gap: 3px; }
+.bs-nerv .bs-emblem b { font: 900 18px var(--bs-body); color: var(--nv); letter-spacing: 0.3em; }
+.bs-nerv .bs-emblem i { font: 600 9.5px var(--bs-num); font-style: normal; color: var(--bs-muted); letter-spacing: 0.26em; }
+.bs-nerv .bs-sub-l { left: 268px; top: 14px; }
+.bs-nerv .bs-tools-l { left: 268px; top: 48px; }
+
+/* 面板標題列用各自的重點色（異常是紅的、額度是綠的），不是全部橘 */
+.bs-nerv .bs-bt { background: var(--acc); }
+
+/* ── 翻牌數字改成電子碼表：黑底、橘色七段數字、標題橘底黑字整條 ── */
+.bs-nerv .bs-counter {
+  background: var(--nv-dark); border: 2px solid var(--nv);
+  align-content: start; padding: 0 0 12px; gap: 0;
+}
+.bs-nerv .bs-counter .bs-lab {
+  justify-self: stretch; background: var(--nv); color: var(--nv-dark);
+  text-align: center; padding: 5px 0; font-size: 14px; font-weight: 900; letter-spacing: 0.34em;
+}
+.bs-nerv .bs-counter .bs-digits { margin-top: 14px; gap: 4px; align-items: center; }
+.bs-nerv .bs-seg7 { width: 27px; height: 46px; display: block; }
+.bs-nerv .bs-seg7 .on { fill: var(--nv); }
+.bs-nerv .bs-seg7 .off { fill: rgba(255, 106, 0, 0.10); }
+.bs-nerv .bs-digits s { color: var(--nv); font-size: 30px; width: 8px; }
+.bs-nerv .bs-digits u { color: var(--bs-ink-2); font-weight: 600; letter-spacing: 0.1em; align-self: center; }
+.bs-nerv .bs-alt { color: var(--bs-ink-2); margin-top: 8px; }
+/* 失敗次數用紅色——這是「有事」的數字 */
+.bs-nerv .bs-alt b { color: var(--nv-red); }
+
+/* ── 紅色的其他去處：異常的嚴重標記、拓撲的失敗節點文字 ── */
+.bs-nerv .bs-events .sv.crit { background: var(--nv-red); }
+.bs-nerv .bs-events li { color: var(--bs-ink); }
+.bs-nerv .bs-warn-chip { color: var(--nv-red); border-color: var(--nv-red); background: rgba(255, 31, 15, 0.10); }
