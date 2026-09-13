@@ -617,7 +617,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               {dc("weapon") ? <img className="bs-botmark" src={dc("weapon")} alt="" aria-hidden="true" /> : null}
             </>
           ) : null}
-          <header className={`bs-head ${skin === "cmd" ? (assets?.logo ? "bs-has-logo" : "") : "bs-has-mark"}`}>
+          <header className={`bs-head ${skin === "cmd" ? (assets?.logo ? "bs-has-logo" : "") : skin === "cyber" ? "bs-has-mark" : ""}`}>
             <svg viewBox="0 0 1920 92" width="1920" height="92" aria-hidden="true">
               <defs>
                 <linearGradient id="bs-hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={P.head.g1} stopOpacity="0.9" /><stop offset="1" stopColor={P.head.g2} stopOpacity="0.15" /></linearGradient>
@@ -636,13 +636,16 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               <rect x="1386" y="10" width="14" height="6" transform="skewX(35)" fill={P.head.chipB} />
               <rect x="1404" y="10" width="22" height="6" transform="skewX(35)" fill={P.head.chipC} />
             </svg>
-            {/* 標誌（2026-09-13 User：「只有第 3 版才放 EVA Logo，其他兩版是放我們原來的 Logo」）：
-                - 作戰指揮：有 public/private/logo.png 用它，沒有（公開版）走原創徽章
-                - 藍紫科幻、黑橘警戒：一律用產品本身的標誌 /logo.png（公開版也有這張） */}
+            {/* 標誌（2026-09-13 與 User 定案）：
+                - 藍紫科幻：產品標誌 /logo.png（圓角圖示配柔和的科幻發光，公開版也有這張）
+                - 黑橘警戒：原創三角形徽章「閘道管制」——直角、線條、警戒色，比圓角圖示更貼這套外觀
+                - 作戰指揮：有 public/private/logo.png 用它，沒有（公開版）走原創徽章 */}
             {skin === "cmd" ? (
               assets?.logo
                 ? <div className="bs-emblem bs-emblem-img"><img src={assets.logo} alt="" /></div>
                 : <Emblem />
+            ) : skin === "nerv" ? (
+              <Emblem />
             ) : (
               <div className="bs-emblem bs-mark"><img src="/logo.png" alt="CostScale" /></div>
             )}

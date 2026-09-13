@@ -766,7 +766,8 @@
 
 /* ══ 頁首左側的標誌（2026-09-13 User：「只有第 3 版才放 EVA Logo，其他兩版是放我們原來的 Logo」）══
    bs-has-logo：作戰指揮放 EVA 橫式標誌（寬 162），日期說明讓到 x 240。
-   bs-has-mark：藍紫科幻、黑橘警戒放產品標誌 /logo.png（正方形 60×60），日期說明只要讓到 x 108。
+   bs-has-mark：藍紫科幻放產品標誌 /logo.png（正方形 60×60），日期說明只要讓到 x 108。
+   黑橘警戒不掛這兩個 class：它用原創三角形徽章，版面走 .bs-nerv .bs-emblem／.bs-sub-l（讓到 x 240）。
    兩種都讓說明文字變兩行——一行寬 436px，會穿過 x 470 起的橫幅斜線（見 .bs-nerv .bs-tools-l 的說明）。 */
 .bs-head.bs-has-logo .bs-emblem { position: absolute; left: 30px; top: 14px; z-index: 4; display: flex; align-items: center; }
 .bs-head.bs-has-logo .bs-emblem-img img { height: 58px; width: auto; display: block; }
