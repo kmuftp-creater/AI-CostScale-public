@@ -617,7 +617,7 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               {dc("weapon") ? <img className="bs-botmark" src={dc("weapon")} alt="" aria-hidden="true" /> : null}
             </>
           ) : null}
-          <header className={`bs-head ${assets?.logo ? "bs-has-logo" : ""}`}>
+          <header className={`bs-head ${skin === "cmd" ? (assets?.logo ? "bs-has-logo" : "") : "bs-has-mark"}`}>
             <svg viewBox="0 0 1920 92" width="1920" height="92" aria-hidden="true">
               <defs>
                 <linearGradient id="bs-hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={P.head.g1} stopOpacity="0.9" /><stop offset="1" stopColor={P.head.g2} stopOpacity="0.15" /></linearGradient>
@@ -636,11 +636,16 @@ export default function BigScreenClient({ data, numFont, initialSkin, assets }: 
               <rect x="1386" y="10" width="14" height="6" transform="skewX(35)" fill={P.head.chipB} />
               <rect x="1404" y="10" width="22" height="6" transform="skewX(35)" fill={P.head.chipC} />
             </svg>
-            {/* 標誌：有 public/private/logo.png 時**三種外觀都顯示**（2026-09-13 User：「要一致藍紫科幻也應該要 logo 吧」）。
-                沒有檔（公開版）時，兩種扁平外觀走原創徽章，藍紫科幻維持不放。 */}
-            {assets?.logo ? (
-              <div className="bs-emblem bs-emblem-img"><img src={assets.logo} alt="" /></div>
-            ) : P.flat ? <Emblem /> : null}
+            {/* 標誌（2026-09-13 User：「只有第 3 版才放 EVA Logo，其他兩版是放我們原來的 Logo」）：
+                - 作戰指揮：有 public/private/logo.png 用它，沒有（公開版）走原創徽章
+                - 藍紫科幻、黑橘警戒：一律用產品本身的標誌 /logo.png（公開版也有這張） */}
+            {skin === "cmd" ? (
+              assets?.logo
+                ? <div className="bs-emblem bs-emblem-img"><img src={assets.logo} alt="" /></div>
+                : <Emblem />
+            ) : (
+              <div className="bs-emblem bs-mark"><img src="/logo.png" alt="CostScale" /></div>
+            )}
             <div className="bs-sub-l"><span>{dateLabel}</span><span>AI 用量與成本</span></div>
             <h1>CostScale AI 閘道營運大屏</h1>
             <div className="bs-sub-r">

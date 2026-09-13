@@ -764,14 +764,20 @@
 /* 側邊直排字上方：欄只有 28px 寬，徽章也直排（writing-mode 只給徽章自己，不給 flex 容器，見 L-240） */
 .bs-cmd .bs-edge .bs-tag { writing-mode: vertical-rl; text-orientation: upright; padding: 4px 1px; font-size: 11px; letter-spacing: 0.08em; opacity: 0.8; }
 
-/* ══ 有標誌圖檔時的頁首左側：三種外觀共用（2026-09-13）══
-   原本只有兩種扁平外觀放標誌，藍紫科幻沒有位置。User 要三種一致，所以版面規則不綁外觀，改綁「有沒有標誌」。
-   數值與扁平外觀相同：標誌在 x 30、日期說明讓到 x 240、說明文字兩行
-   （一行會寬到 x 676，穿過 x 470 起的橫幅斜線——扁平外觀修過一次，見 .bs-nerv .bs-tools-l 的說明）。 */
+/* ══ 頁首左側的標誌（2026-09-13 User：「只有第 3 版才放 EVA Logo，其他兩版是放我們原來的 Logo」）══
+   bs-has-logo：作戰指揮放 EVA 橫式標誌（寬 162），日期說明讓到 x 240。
+   bs-has-mark：藍紫科幻、黑橘警戒放產品標誌 /logo.png（正方形 60×60），日期說明只要讓到 x 108。
+   兩種都讓說明文字變兩行——一行寬 436px，會穿過 x 470 起的橫幅斜線（見 .bs-nerv .bs-tools-l 的說明）。 */
 .bs-head.bs-has-logo .bs-emblem { position: absolute; left: 30px; top: 14px; z-index: 4; display: flex; align-items: center; }
 .bs-head.bs-has-logo .bs-emblem-img img { height: 58px; width: auto; display: block; }
 .bs-head.bs-has-logo .bs-sub-l { left: 240px; }
 .bs-head.bs-has-logo .bs-tools-l { left: 240px; top: 48px; display: flex; flex-direction: column; gap: 1px; font-size: 11px; line-height: 1.35; }
 .bs-head.bs-has-logo .bs-tools-l span { white-space: nowrap; }
 .bs-head.bs-has-logo .bs-tools-l .bs-tl-sep { display: none; }
+.bs-head.bs-has-mark .bs-emblem { position: absolute; left: 30px; top: 16px; z-index: 4; display: flex; align-items: center; }
+.bs-head.bs-has-mark .bs-mark img { width: 60px; height: 60px; display: block; border-radius: 12px; }
+.bs-head.bs-has-mark .bs-sub-l { left: 108px; }
+.bs-head.bs-has-mark .bs-tools-l { left: 108px; top: 48px; display: flex; flex-direction: column; gap: 1px; font-size: 11px; line-height: 1.35; }
+.bs-head.bs-has-mark .bs-tools-l span { white-space: nowrap; }
+.bs-head.bs-has-mark .bs-tools-l .bs-tl-sep { display: none; }
 
