@@ -9,7 +9,6 @@ import {
   listQuotaPools,
   getSpendTrend,
   getUnitEconomics,
-  getOtelSummary,
   getCliUsageSummary,
   combineAllSourceTokens,
   getSubscriptionSavings,
@@ -59,7 +58,7 @@ export default async function OverviewPage({
   // 匯率要先拿到——趨勢與單位成本都要用它把 USD 折成台幣。
   // 多一次往返，但那是本機資料庫的單筆查詢，代價可以忽略。
   const fxRate = await getFxRate();
-  const [summary, apps, subscriptions, gcp, quotaPools, subUsage, trend, unitEcon, otel, cliUsage, savings] =
+  const [summary, apps, subscriptions, gcp, quotaPools, subUsage, trend, unitEcon, cliUsage, savings] =
     await Promise.all([
       getUsageSummary(new Date(range.from), new Date(range.to)),
       listApps(),
@@ -72,12 +71,11 @@ export default async function OverviewPage({
       // 「總 Token」那格要算的是 User 所有的使用量，不是只有經過閘道的那一小塊。
       // 閘道的量在這個月是 284 萬，而 Claude Code 與 Codex 直接用掉的是幾十億——
       // 只顯示前者會讓那格看起來永遠不動（2026-08-29 User 回報）。
-      getOtelSummary(new Date(range.from), new Date(range.to)),
       getCliUsageSummary(new Date(range.from), new Date(range.to)),
       // 「訂閱省下多少」：實際用掉的 token × 官方 API 價目 − 月費。
       getSubscriptionSavings(new Date(range.from), new Date(range.to), fxRate.rate),
     ]);
-  const allTokens = combineAllSourceTokens(summary.totalTokens, otel, cliUsage);
+  const allTokens = combineAllSourceTokens(summary.totalTokens, cliUsage);
 
   // 免費額度：只看有設上限的池，沒設上限的算不出剩餘量。
   const freePools = quotaPools.filter((p) => p.enabled);

@@ -3025,15 +3025,22 @@ function monthlyEquivalentFee(fee: number, cycle: string): number {
 
 export function combineAllSourceTokens(
   gatewayTokens: number,
-  otel: OtelSummary,
   cli: CliUsageSummary
 ): AllSourceTokens {
-  // OTLP 的 totalTokens 是 input＋output，快取要另外加回來才是「全部送進去的量」。
-  const claudeAll = otel.totalTokens + otel.totalCacheRead + otel.totalCacheWrite;
-  const claudeCached = otel.totalCacheRead;
-  // session 檔的 total_tokens 本來就含 cached_input_tokens，不要再加。
-  const codexAll = cli.totalTokens;
-  const codexCached = cli.bySource.reduce((n, s) => n + s.cachedInputTokens, 0);
+  // **每一列只取自己的來源。** cli_session_usage 同時存 Claude Code（claude-code-local）
+  // 與 Codex（codex-cli）；拿整張表的合計當 Codex，會把 Claude Code 的量算進 Codex。
+  // Claude Code 也不讀 OTel 遙測——遙測只收得到約四成，與其他面板不一致。
+  //
+  // 兩個來源的 total_tokens 都已經是「含快取的全部量」，不要再加：
+  //   claude-code-local：total = input＋output＋cache_read＋cache_write
+  //   codex-cli：        total = input＋output，而 input 本身含 cached
+  const src = (name: string) => cli.bySource.find((s) => s.source === name);
+  const claude = src("claude-code-local");
+  const codex = src("codex-cli");
+  const claudeAll = claude?.totalTokens ?? 0;
+  const claudeCached = claude?.cachedInputTokens ?? 0;
+  const codexAll = codex?.totalTokens ?? 0;
+  const codexCached = codex?.cachedInputTokens ?? 0;
   const all = gatewayTokens + claudeAll + codexAll;
   const cached = claudeCached + codexCached;
   return {

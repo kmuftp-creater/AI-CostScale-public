@@ -233,7 +233,7 @@ function Get-TailFacts {
   param([string]$Path, [int]$Tail)
 
   $result = @{ TokenLine = $null; Model = $null }
-  $candidates = Get-Content -LiteralPath $Path -Tail $Tail -ErrorAction SilentlyContinue
+  $candidates = Get-Content -LiteralPath $Path -Tail $Tail -Encoding UTF8 -ErrorAction SilentlyContinue
   if ($candidates) {
     for ($i = $candidates.Count - 1; $i -ge 0; $i--) {
       $line = $candidates[$i]
@@ -247,7 +247,7 @@ function Get-TailFacts {
   }
   if (-not $result.TokenLine) {
     # 退路：整份掃。只有極短或極特殊的檔會走到這裡。
-    $all = Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue
+    $all = Get-Content -LiteralPath $Path -Encoding UTF8 -ErrorAction SilentlyContinue
     if ($all) {
       for ($i = $all.Count - 1; $i -ge 0; $i--) {
         $line = $all[$i]
@@ -267,7 +267,10 @@ $skipped  = 0
 
 foreach ($f in $files) {
   try {
-    $metaLine = Get-Content -LiteralPath $f.FullName -TotalCount 1 -ErrorAction Stop
+    # -Encoding UTF8 不能省：Windows PowerShell 5.1 預設用系統碼頁讀檔，
+    # Codex 0.153 起 session_meta 帶整段英文系統提示，裡面的「—」「’」會被讀成亂碼，
+    # 把後面的引號吃掉，整行 JSON 解析失敗，那個 session 就被跳過。
+    $metaLine = Get-Content -LiteralPath $f.FullName -TotalCount 1 -Encoding UTF8 -ErrorAction Stop
     if (-not $metaLine) { $skipped++; continue }
     $meta = $metaLine | ConvertFrom-Json
     if ($meta.type -ne 'session_meta') { $skipped++; continue }
