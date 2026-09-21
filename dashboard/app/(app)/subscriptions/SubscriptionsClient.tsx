@@ -8,14 +8,26 @@ type Row = {
   id: number;
   service: string;
   plan: string | null;
-  /** 該計費週期的金額：月繳是月費、年繳是年費。 */
+  /**
+   * 該計費週期的**未稅牌價**：月繳是月費、年繳是年費。
+   * 實付＝fee ×(1 + tax_pct/100)，別直接拿 fee 當金額用。
+   */
   fee: string | number;
+  /** 加在 fee 上面的稅率（%）。台灣 VAT 是 5。 */
+  tax_pct: string | number;
   currency: string;
   billing_cycle: "monthly" | "yearly";
   billing_day: number;
   billing_month: number | null;
   status: string;
   note: string | null;
+  /** 複查日 YYYY-MM-DD。null＝不用複查。 */
+  review_at: string | null;
+  /**
+   * 刷卡時算不算海外交易（決定收不收國外交易服務費）。
+   * **null 是「還沒確認」，不是「否」。** 畫面上要分得出來。
+   */
+  overseas: boolean | null;
 };
 
 function nextBilling(row: Row): string {
@@ -33,15 +45,41 @@ function nextBilling(row: Row): string {
   return `${next.getMonth() + 1}/${next.getDate()}（${days} 天後）`;
 }
 
+/**
+ * 複查日還剩幾天。負數＝已經過了。
+ *
+ * 兩端都切到「日期」再相減，不要用毫秒差除以 86400000：
+ * 那會把「今天下午」算成 0.x 天然後被 floor 成 0 或 -1，取決於現在幾點。
+ * 複查日是一個沒有時間的概念，算式裡就不該出現時間。
+ */
+function daysUntil(isoDate: string): number {
+  const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  const a = Date.UTC(
+    Number(today.slice(0, 4)),
+    Number(today.slice(5, 7)) - 1,
+    Number(today.slice(8, 10))
+  );
+  const b = Date.UTC(
+    Number(isoDate.slice(0, 4)),
+    Number(isoDate.slice(5, 7)) - 1,
+    Number(isoDate.slice(8, 10))
+  );
+  return Math.round((b - a) / 86400000);
+}
+
 /** 編輯中的暫存值。一律用字串，送出前才轉數字——輸入途中的半成品不該被迫合法。 */
 type Draft = {
   service: string;
   plan: string;
   fee: string;
+  tax: string;
   currency: string;
   cycle: "monthly" | "yearly";
   day: string;
   month: string;
+  review: string;
+  /** 海外交易，三態用字串表示：'true'／'false'／''（還沒確認）。 */
+  overseas: string;
   note: string;
 };
 
@@ -90,6 +128,18 @@ type Charge = {
   source?: string;
   /** 人工補這筆的理由。 */
   note?: string | null;
+  /**
+   * 扣款當下的稅率快照（%）。手動補的一律 0——那筆填的是實際被扣的錢，已含稅。
+   * 台幣預期＝fee ×(1+tax_pct/100)× fx_rate ×(1+markup_pct/100)。
+   */
+  tax_pct?: string | number;
+  /**
+   * 扣款當下的方案名快照。null＝這筆產生時還沒有這一欄，畫面上留白。
+   *
+   * 這裡**不能**改抓訂閱清單上那一列的 plan：那是現在的方案，
+   * 升級之後舊扣款會顯示成新方案（2026-09-21 Claude 5x→20x）。
+   */
+  plan?: string | null;
 };
 
 export default function SubscriptionsClient({
@@ -97,6 +147,7 @@ export default function SubscriptionsClient({
   charges: initialCharges,
   fx,
   fxBase,
+  markupPct,
   fxDay,
   fxStale,
 }: {
@@ -105,6 +156,8 @@ export default function SubscriptionsClient({
   fx: number;
   /** 現在的牌告匯率，未加手續費。用來跟凍結值比較。 */
   fxBase: number;
+  /** 國外交易服務費率（%）。台幣計價的海外訂閱要靠它——fx 夾帶不了。 */
+  markupPct: number;
   fxDay: string | null;
   fxStale: boolean;
 }) {
@@ -113,6 +166,12 @@ export default function SubscriptionsClient({
   const [service, setService] = useState("");
   const [plan, setPlan] = useState("");
   const [fee, setFee] = useState("");
+  /** 稅率（%）。台灣的境外數位服務多半是 5% VAT，但不預設填——猜一個會被當成查證過的。 */
+  const [tax, setTax] = useState("");
+  /** 複查日。臨時升級／降級一定要設，不然忘了改回去會凍成錯的金額。 */
+  const [review, setReview] = useState("");
+  /** 海外交易，三態：''＝還沒確認。預設留空，不要替使用者猜。 */
+  const [overseas, setOverseas] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [cycle, setCycle] = useState<"monthly" | "yearly">("monthly");
   const [day, setDay] = useState("1");
@@ -150,10 +209,24 @@ export default function SubscriptionsClient({
   const [mcNote, setMcNote] = useState("");
   const [mcError, setMcError] = useState<string | null>(null);
 
-  /** 每月等值的台幣金額。年繳先除 12，否則加總會把一筆年繳當成十二倍。 */
+  /** 未稅牌價 → 原幣實付。與後端 lib/db.ts 的 payableFee 是同一條算式。 */
+  const payable = (fee: number, taxPct: number) => fee * (1 + (taxPct || 0) / 100);
+
+  /**
+   * 每月等值的台幣金額。與後端 lib/db.ts 的 monthlyTwdOf 是同一條算式。
+   *
+   * 三件事都要做，少一件就是系統性偏低——這裡全部踩過：
+   *   先入稅（牌價不是實付）、年繳折月、海外交易加國外交易服務費。
+   * **最後那項看的是 overseas 不是幣別**：OpenAI 以台幣計價，帳單照樣收 1.5%。
+   */
   const toTwd = (r: Row) => {
-    const perMonth = monthlyEquivalent(Number(r.fee) || 0, r.billing_cycle);
-    return r.currency === "TWD" ? perMonth : perMonth * fx;
+    const perMonth = monthlyEquivalent(
+      payable(Number(r.fee) || 0, Number(r.tax_pct) || 0),
+      r.billing_cycle
+    );
+    // 非台幣必然是海外交易，而 fx 已經含手續費了，不要再乘一次。
+    if (r.currency !== "TWD") return perMonth * fx;
+    return r.overseas === true ? perMonth * (1 + markupPct / 100) : perMonth;
   };
   const active = rows.filter((r) => r.status === "active");
   const monthlyTwd = active.reduce((s, r) => s + toTwd(r), 0);
@@ -168,8 +241,11 @@ export default function SubscriptionsClient({
    */
   const chargeTotalTwd = charges.reduce((sum, c) => sum + Number(c.amount_twd), 0);
   const chargeTotalAtToday = charges.reduce((sum, c) => {
-    if (c.currency === "TWD") return sum + Number(c.fee);
-    return sum + Number(c.fee) * fxBase * (1 + Number(c.markup_pct) / 100);
+    // 入稅點要跟凍結時一致，否則這一格的差額會混進一個 5%，
+    // 而它的用途是「只反映匯率變動」。
+    const due = payable(Number(c.fee), Number(c.tax_pct) || 0);
+    if (c.currency === "TWD") return sum + due;
+    return sum + due * fxBase * (1 + Number(c.markup_pct) / 100);
   }, 0);
   const driftTwd = chargeTotalAtToday - chargeTotalTwd;
 
@@ -189,7 +265,9 @@ export default function SubscriptionsClient({
     reconciled.length === 0
       ? null
       : (reconciled.reduce((sum, c) => {
-          const base = Number(c.fee) * Number(c.fx_rate);
+          // 分母要用**含稅的原幣應付**。用未稅牌價的話，反推出來的
+          // 「手續費率」會是「稅 ＋ 卡費」的混合值，兩個未知數混在一起就再也校不準了。
+          const base = payable(Number(c.fee), Number(c.tax_pct) || 0) * Number(c.fx_rate);
           return sum + (Number(c.actual_twd) / base - 1);
         }, 0) /
           reconciled.length) *
@@ -311,6 +389,9 @@ export default function SubscriptionsClient({
           service: service.trim(),
           plan: plan.trim() || undefined,
           fee,
+          taxPct: tax,
+          overseas: overseas === "" ? undefined : overseas === "true",
+          reviewAt: review,
           billingCycle: cycle,
           billingMonth: cycle === "yearly" ? Number(month) : undefined,
           currency,
@@ -326,6 +407,9 @@ export default function SubscriptionsClient({
       setService("");
       setPlan("");
       setFee("");
+      setTax("");
+      setReview("");
+      setOverseas("");
       setDay("1");
       router.refresh();
     } catch {
@@ -342,6 +426,9 @@ export default function SubscriptionsClient({
       service: row.service,
       plan: row.plan ?? "",
       fee: String(row.fee),
+      tax: String(Number(row.tax_pct) || 0),
+      review: row.review_at ?? "",
+      overseas: row.overseas === null ? "" : String(row.overseas),
       currency: row.currency,
       cycle: row.billing_cycle,
       day: String(row.billing_day),
@@ -372,6 +459,9 @@ export default function SubscriptionsClient({
           service: draft.service.trim(),
           plan: draft.plan.trim(),
           fee: draft.fee,
+          taxPct: draft.tax,
+          overseas: draft.overseas === "" ? null : draft.overseas === "true",
+          reviewAt: draft.review,
           currency: draft.currency,
           // 週期一定要送：後端收到它才會把月繳的 billing_month 清成 null，
           // 否則從年繳改月繳會留下一個沒有意義的月份，違反資料表的一致性約束。
@@ -429,7 +519,7 @@ export default function SubscriptionsClient({
       <section className="block">
         <div className="ledger-strip">
           <div className="ledger-cell">
-            <span className="microlabel">每月訂閱總支出 · Fixed</span>
+            <span className="microlabel">每月訂閱總支出 · Fixed · 含稅</span>
             <div className="hero-figure">
               <span className="unit">NT$ </span>
               {Math.round(monthlyTwd).toLocaleString("zh-TW")}
@@ -493,6 +583,23 @@ export default function SubscriptionsClient({
               />
             </label>
             <label>
+              稅率 %（選填）
+              <input
+                value={tax}
+                onChange={(e) => setTax(e.target.value)}
+                placeholder="台灣 VAT 填 5"
+                inputMode="decimal"
+              />
+            </label>
+            <label>
+              海外交易
+              <select value={overseas} onChange={(e) => setOverseas(e.target.value)}>
+                <option value="">還沒確認</option>
+                <option value="true">是，帳單有國外交易服務費</option>
+                <option value="false">否，本地交易</option>
+              </select>
+            </label>
+            <label>
               幣別
               <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
                 <option value="USD">USD</option>
@@ -519,6 +626,10 @@ export default function SubscriptionsClient({
                 inputMode="numeric"
                 placeholder="1"
               />
+            </label>
+            <label>
+              複查日（選填）
+              <input type="date" value={review} onChange={(e) => setReview(e.target.value)} />
             </label>
             <button className="btn-primary" type="submit" disabled={busy}>
               {busy ? "新增中…" : "新增訂閱"}
@@ -590,6 +701,25 @@ export default function SubscriptionsClient({
                             />
                           </label>
                           <label>
+                            稅率 %
+                            <input
+                              value={draft.tax}
+                              inputMode="decimal"
+                              onChange={(e) => setDraft({ ...draft, tax: e.target.value })}
+                            />
+                          </label>
+                          <label>
+                            海外交易
+                            <select
+                              value={draft.overseas}
+                              onChange={(e) => setDraft({ ...draft, overseas: e.target.value })}
+                            >
+                              <option value="">還沒確認</option>
+                              <option value="true">是，帳單有國外交易服務費</option>
+                              <option value="false">否，本地交易</option>
+                            </select>
+                          </label>
+                          <label>
                             幣別
                             <select
                               value={draft.currency}
@@ -623,6 +753,14 @@ export default function SubscriptionsClient({
                             />
                           </label>
                           <label>
+                            複查日
+                            <input
+                              type="date"
+                              value={draft.review}
+                              onChange={(e) => setDraft({ ...draft, review: e.target.value })}
+                            />
+                          </label>
+                          <label>
                             備註（選填）
                             <input
                               value={draft.note}
@@ -649,6 +787,25 @@ export default function SubscriptionsClient({
                           : `每月 ${r.billing_day} 日扣款`}
                         {r.status === "active" ? ` · 下次 ${nextBilling(r)}` : " · 已停用"}
                         {r.note ? ` · ${r.note}` : ""}
+                        {/* 複查日另起一行，不要跟扣款資訊擠在同一串。
+                            它是「要動手的那一天」，跟「系統會自己扣款的那一天」
+                            意思相反，混在一起讀會看錯。 */}
+                        {r.review_at ? (
+                          <span
+                            style={{
+                              display: "block",
+                              fontWeight: daysUntil(r.review_at) <= 14 ? 600 : undefined,
+                            }}
+                          >
+                            複查日 {r.review_at}
+                            {(() => {
+                              const d = daysUntil(r.review_at!);
+                              if (d < 0) return `（已過 ${-d} 天，還沒處理）`;
+                              if (d === 0) return "（就是今天）";
+                              return `（${d} 天後）`;
+                            })()}
+                          </span>
+                        ) : null}
                       </small>
                     </td>
                     <td className="t-kind k-sub">
@@ -658,6 +815,29 @@ export default function SubscriptionsClient({
                       {r.currency === "USD" ? "US$" : "NT$"}
                       {Number(r.fee).toLocaleString("zh-TW")}
                       <small>
+                        {/* 有稅就把「牌價 → 實付」寫出來。只顯示其中一個數字，
+                            另一個就會變成別人心算的結果，而那正是 2026-09-21
+                            少記 5% 的起點。 */}
+                        {Number(r.tax_pct) > 0
+                          ? `＋${Number(r.tax_pct)}% 稅 · 實付 ${
+                              r.currency === "USD" ? "US$" : "NT$"
+                            }${payable(
+                              Number(r.fee) || 0,
+                              Number(r.tax_pct) || 0
+                            ).toLocaleString("zh-TW", { maximumFractionDigits: 2 })}`
+                          : "未稅"}
+                        <br />
+                        {/* 國外交易服務費的狀態。**「還沒確認」要看得出來**——
+                            它跟「確認是本地交易」的計算結果一樣（都不加），
+                            但意義完全不同，不標的話沒有人會回來確認。 */}
+                        {r.currency !== "TWD"
+                          ? `含 ${markupPct}% 國外交易服務費`
+                          : r.overseas === true
+                          ? `含 ${markupPct}% 國外交易服務費`
+                          : r.overseas === false
+                          ? "本地交易，無服務費"
+                          : "海外交易未確認 · 暫不計服務費"}
+                        <br />
                         {r.billing_cycle === "yearly" ? "／年 · 折合 " : ""}
                         NT$ {Math.round(toTwd(r)).toLocaleString("zh-TW")}／月
                       </small>
@@ -685,6 +865,14 @@ export default function SubscriptionsClient({
           <div className="panel-foot">
             {"改月費、改扣款日請按「編輯」，不要刪掉重建——刪除會連同這筆訂閱的" +
               "歷史扣款紀錄一起消失，而那裡面存的是扣款當下的匯率快照，補不回來。" +
+              "「實際入帳」填的是信用卡帳單上這筆交易的**台幣總額**：" +
+              "海外消費在帳單上是兩行，消費本金一行、「國外交易服務費」一行，兩行要相加。" +
+              "只填本金的話，下面反推出來的溢價會整批少一個手續費率——2026-09-21 踩過。" +
+              "另外「海外交易」看的是收單商家在不在海外，不是幣別：" +
+              "OpenAI 以台幣計價，帳單照樣收國外交易服務費。" +
+              "月費一律填**未稅牌價**，稅填在「稅率 %」那一欄——" +
+              "把稅併進月費會讓這個數字對不上供應商的官方價目，也會讓下面" +
+              "「實際手續費率 · 反推」變成「稅＋卡費」的混合值而永遠校不準。" +
               "訂閱是固定費用，不隨用量變動，所以與 API 成本分開統計。" +
               "年繳的金額已折合成每月等值後才加總，避免一筆年繳被當成十二倍。" +
               "這些帳號實際消耗多少 token，請看「遙測」頁。"}
@@ -766,6 +954,10 @@ export default function SubscriptionsClient({
               用今天的匯率換算並標成「手動」。
               <strong>要改的是以後每個月的月費，請用上面那張表的「編輯」</strong>——
               兩件事分開做，帳才對得起來。
+              {/* 順序會寫進紀錄：這筆的方案名取自送出當下訂閱列上的 plan。 */}
+              <br />
+              升級的順序是<strong>先用「編輯」把方案、月費、扣款日改成新的，再回來補這一筆</strong>，
+              這筆差額才會被標成新方案。反過來做會標成舊方案，而且事後只能刪掉重補。
             </div>
           ) : null}
           {mcError ? <div className="form-error">{mcError}</div> : null}
@@ -832,7 +1024,7 @@ export default function SubscriptionsClient({
                     <th>原幣金額</th>
                     <th>凍結匯率</th>
                     <th>台幣金額 · 預期</th>
-                    <th>實際入帳</th>
+                    <th>實際入帳 · 含服務費</th>
                     <th />
                   </tr>
                 </thead>
@@ -845,15 +1037,40 @@ export default function SubscriptionsClient({
                       <tr key={c.id}>
                         <td>
                           {c.charged_on}
-                          {c.source === "manual" ? (
+                          {/* note 不是只有手動那幾列才有（2026-09-21）。
+                              自動凍結的列也可能被註記——例如「這筆的扣款日是錯的，
+                              反推溢價不可用」。原本只印 manual 的 note，
+                              那種註記寫了也看不到，等於沒寫。 */}
+                          {c.source === "manual" || c.note ? (
                             <span className="microlabel" style={{ display: "block" }}>
-                              手動{c.note ? ` · ${c.note}` : ""}
+                              {c.source === "manual" ? "手動" : ""}
+                              {c.source === "manual" && c.note ? " · " : ""}
+                              {c.note ?? ""}
                             </span>
                           ) : null}
                         </td>
-                        <td>{c.service}</td>
+                        <td>
+                          {c.service}
+                          {/* 方案名取自扣款當下的快照，不是訂閱現在的方案。
+                              舊資料沒有這一欄，留白比猜一個好——「不知道」與
+                              「20x」是兩件事。 */}
+                          {c.plan ? (
+                            <span className="microlabel" style={{ display: "block" }}>
+                              {c.plan}
+                            </span>
+                          ) : null}
+                        </td>
                         <td>
                           {c.currency} {Number(c.fee).toLocaleString("zh-TW")}
+                          {Number(c.tax_pct) > 0 ? (
+                            <span className="microlabel" style={{ display: "block" }}>
+                              ＋{Number(c.tax_pct)}% 稅 ＝ {c.currency}{" "}
+                              {payable(Number(c.fee), Number(c.tax_pct)).toLocaleString("zh-TW", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </span>
+                          ) : null}
                         </td>
                         <td>
                           {isTwd ? (
@@ -885,13 +1102,18 @@ export default function SubscriptionsClient({
                                 saveActual(c.id, reconVal);
                               }}
                             >
+                              {/* C13：placeholder 要講清楚填的是**總額**。
+                                  帳單上海外消費是兩行（本金、國外交易服務費），
+                                  只填本金會讓反推的溢價整批少一個 markup_pct——
+                                  2026-09-21 踩過，而且據此下了錯誤結論。 */}
                               <input
                                 autoFocus
                                 value={reconVal}
                                 onChange={(e) => setReconVal(e.target.value)}
-                                placeholder="帳單金額"
+                                placeholder="本金＋服務費"
+                                title="填帳單上這筆交易的台幣總額：消費本金那一行 ＋ 緊接著的「國外交易服務費」那一行"
                                 inputMode="decimal"
-                                style={{ width: "7rem" }}
+                                style={{ width: "8rem" }}
                               />
                               <button className="btn-ghost" type="submit">
                                 存

@@ -34,6 +34,13 @@ export async function PATCH(
     }
     patch.fee = fee;
   }
+  if (body.taxPct !== undefined) {
+    const taxPct = Number(body.taxPct === "" ? 0 : body.taxPct);
+    if (!Number.isFinite(taxPct) || taxPct < 0 || taxPct >= 100) {
+      return NextResponse.json({ error: "稅率必須是 0 到 99.999 之間的數字" }, { status: 400 });
+    }
+    patch.taxPct = taxPct;
+  }
   if (typeof body.billingCycle === "string") {
     if (!["monthly", "yearly"].includes(body.billingCycle)) {
       return NextResponse.json({ error: "計費週期必須是 monthly 或 yearly" }, { status: 400 });
@@ -68,6 +75,24 @@ export async function PATCH(
     patch.status = body.status;
   }
   if (typeof body.note === "string") patch.note = body.note.trim() || null;
+  if (body.overseas !== undefined) {
+    // null 是合法值（還沒確認），所以不能用 typeof === "boolean" 擋。
+    if (body.overseas !== null && typeof body.overseas !== "boolean") {
+      return NextResponse.json(
+        { error: "overseas 只能是 true、false 或 null" },
+        { status: 400 }
+      );
+    }
+    patch.overseas = body.overseas;
+  }
+  if (typeof body.reviewAt === "string") {
+    const reviewAt = body.reviewAt.trim();
+    if (reviewAt && !/^\d{4}-\d{2}-\d{2}$/.test(reviewAt)) {
+      return NextResponse.json({ error: "複查日要是 YYYY-MM-DD" }, { status: 400 });
+    }
+    // 空字串代表清掉，所以這裡送的是 null 而不是略過。
+    patch.reviewAt = reviewAt || null;
+  }
 
   const updated = await patchSubscription(numericId, patch);
   if (!updated) {

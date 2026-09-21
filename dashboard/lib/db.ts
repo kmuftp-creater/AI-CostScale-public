@@ -753,8 +753,14 @@ export type SubscriptionRow = {
   id: number;
   service: string;
   plan: string | null;
-  /** 該計費週期的金額。月繳是月費、年繳是年費——看 billing_cycle 才知道是哪個。 */
+  /**
+   * 該計費週期的**未稅牌價**。月繳是月費、年繳是年費——看 billing_cycle 才知道是哪個。
+   *
+   * **這不是實付金額。** 實付＝fee ×(1 + tax_pct/100)，見 db/init/30。
+   */
   fee: string;
+  /** 加在 fee 上面的稅率（%）。台灣 VAT 是 5。0＝牌價就是實付。 */
+  tax_pct: string;
   currency: string;
   billing_cycle: "monthly" | "yearly";
   billing_day: number;
@@ -762,13 +768,33 @@ export type SubscriptionRow = {
   billing_month: number | null;
   status: string;
   note: string | null;
+  /**
+   * 要回來檢查一次的日期（降級、退訂、方案到期）。null＝不用複查。
+   * 臨時升級一定要設：排程在扣款日當天用當下的 fee 凍結，改晚了就凍成錯的金額。
+   */
+  review_at: string | null;
+  /**
+   * 刷卡時算不算海外交易（決定收不收國外交易服務費）。
+   * true＝已確認、false＝已確認是本地、**null＝還沒確認**。
+   * 非台幣計價必然是 true；台幣計價要看收單商家（OpenAI 以台幣計價但照樣收）。
+   */
+  overseas: boolean | null;
 };
 
 export async function listSubscriptions(): Promise<SubscriptionRow[]> {
   try {
     const client = getPool();
     const result = await client.query<SubscriptionRow>(
-      `SELECT id, service, plan, fee, currency, billing_cycle, billing_day, billing_month, status, note
+      // 欄位是逐一列出的，不是 SELECT *——**新增欄位一定要回來加這裡**，
+      // 漏掉不會報錯，只會讓畫面拿到 undefined 然後被 `|| 0` 靜靜當成沒有值。
+      // 2026-09-21 加 tax_pct 時就漏了一次：稅率填了 5，畫面照樣算成未稅。
+      //
+      // review_at 是 DATE，在 SQL 就轉成字串。讓 pg 驅動轉成 JS Date 再序列化，
+      // 會變成 2026-10-20T00:00:00.000Z 那種帶時區的值，
+      // 前端 <input type="date"> 吃不了，而且跨時區會差一天（同 charged_on 的處理）。
+      `SELECT id, service, plan, fee, tax_pct, currency, billing_cycle, billing_day,
+              billing_month, status, note, overseas,
+              to_char(review_at, 'YYYY-MM-DD') AS review_at
        FROM costscale.subscriptions
        ORDER BY id ASC`
     );
@@ -797,6 +823,18 @@ export type SubscriptionChargeRow = {
   source: string;
   /** 人工補這筆的理由。自動入帳是 null。 */
   note: string | null;
+  /**
+   * 扣款當下的方案名快照（例：5x、20x）。null＝這筆產生時還沒有這一欄。
+   *
+   * **不要改用 subscriptions.plan 取代它**：那是現況值，升級之後回頭看，
+   * 舊扣款會顯示成新方案（2026-09-21 Claude 5x→20x 當場踩到）。
+   */
+  plan: string | null;
+  /**
+   * 扣款當下的稅率快照（%）。台幣預期＝fee ×(1+tax_pct/100)× fx_rate ×(1+markup_pct/100)。
+   * source='manual' 一律 0：人工補的金額填的是實際被扣的錢，已經含稅。
+   */
+  tax_pct: string;
   /** 信用卡帳單上的實際入帳金額，人工填。null 表示尚未對帳。 */
   actual_twd: string | null;
   reconciled_at: string | null;
@@ -1095,18 +1133,27 @@ export async function getUnitEconomics(fxRate: number): Promise<UnitEconomics> {
       }
     }
 
+    const markupPct = await getMarkupPct();
     const { rows: subs } = await client.query<{
-      service: string; fee: string; currency: string; billing_cycle: string;
+      service: string; fee: string; tax_pct: string; currency: string;
+      billing_cycle: string; overseas: boolean | null;
     }>(
-      `SELECT service, fee, currency, billing_cycle
+      `SELECT service, fee, tax_pct, currency, billing_cycle, overseas
          FROM costscale.subscriptions WHERE status = 'active' ORDER BY id`
     );
 
     const rows: UnitCostRow[] = [];
     for (const sub of subs) {
-      const perMonth =
-        (Number(sub.fee) || 0) / (sub.billing_cycle === "yearly" ? 12 : 1);
-      const monthlyTwd = sub.currency === "TWD" ? perMonth : perMonth * fxRate;
+      // 入稅、折月、換匯、加國外交易服務費全在 monthlyTwdOf 裡（db/init/30、32）。
+      const monthlyTwd = monthlyTwdOf({
+        fee: Number(sub.fee) || 0,
+        taxPct: Number(sub.tax_pct) || 0,
+        cycle: String(sub.billing_cycle),
+        currency: String(sub.currency),
+        overseas: sub.overseas,
+        fxWithMarkup: fxRate,
+        markupPct,
+      });
 
       const mapping = SUB_TOKEN_SOURCE[sub.service];
       const win = mapping ? srcWindow.get(`${mapping.table}:${mapping.source}`) ?? null : null;
@@ -1257,15 +1304,23 @@ export async function addManualCharge(params: {
   const isTwd = params.currency.toUpperCase() === "TWD";
   const rate = isTwd ? 1 : fx.baseRate;
   const markup = isTwd ? 0 : fx.markupPct;
+  // **這裡不入稅，tax_pct 寫 0**（2026-09-21，db/init/30）。
+  // 人工補的金額填的是「信用卡實際被扣多少」——發票上的應付金額本來就含稅了
+  // （Anthropic 那張：小計 151.06 ＋ VAT 7.55 ＝ 158.61，使用者填的是 158.61）。
+  // 再乘一次 tax_pct 會重複計稅。自動凍結那條路不同：它從牌價出發，所以要入稅。
   const amount = params.fee * rate * (1 + markup / 100);
 
   const result = await client.query<SubscriptionChargeRow>(
+    // plan 取的是**寫入當下**訂閱列上的方案名（db/init/29）。
+    // 所以升級的正確操作順序是「先把訂閱改成新方案，再補這筆差額」——
+    // 反過來做，差額會被標成舊方案。
     `INSERT INTO costscale.subscription_charges
-       (sub_id, charged_on, fee, currency, fx_rate, fx_source, markup_pct, amount_twd, source, note)
-     VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, 'manual', $9)
+       (sub_id, charged_on, fee, currency, fx_rate, fx_source, markup_pct, amount_twd, source, note, plan, tax_pct)
+     VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, 'manual', $9,
+             (SELECT plan FROM costscale.subscriptions WHERE id = $1), 0)
      RETURNING id, sub_id, to_char(charged_on, 'YYYY-MM-DD') AS charged_on,
                fee, currency, fx_rate, fx_source, markup_pct, amount_twd,
-               source, note, actual_twd, reconciled_at,
+               source, note, plan, tax_pct, actual_twd, reconciled_at,
                (SELECT service FROM costscale.subscriptions WHERE id = sub_id) AS service`,
     [
       params.subId,
@@ -1298,7 +1353,7 @@ export async function deleteManualCharge(id: number): Promise<SubscriptionCharge
       WHERE id = $1 AND source = 'manual'
       RETURNING id, sub_id, to_char(charged_on, 'YYYY-MM-DD') AS charged_on,
                 fee, currency, fx_rate, fx_source, markup_pct, amount_twd,
-                source, note, actual_twd, reconciled_at,
+                source, note, plan, tax_pct, actual_twd, reconciled_at,
                 (SELECT service FROM costscale.subscriptions WHERE id = sub_id) AS service`,
     [id]
   );
@@ -1318,7 +1373,7 @@ export async function listSubscriptionCharges(limit = 60): Promise<SubscriptionC
               to_char(c.charged_on, 'YYYY-MM-DD') AS charged_on,
               c.fee, c.currency,
               c.fx_rate, c.fx_source, c.markup_pct, c.amount_twd,
-              c.source, c.note, c.actual_twd, c.reconciled_at
+              c.source, c.note, c.plan, c.tax_pct, c.actual_twd, c.reconciled_at
          FROM costscale.subscription_charges c
          JOIN costscale.subscriptions s ON s.id = c.sub_id
         ORDER BY c.charged_on DESC, s.service ASC
@@ -1446,29 +1501,40 @@ export async function getGcpUsage(from: Date, to: Date): Promise<GcpUsageSummary
 export async function createSubscription(input: {
   service: string;
   plan?: string | null;
+  /** 未稅牌價。實付＝fee ×(1 + taxPct/100)。 */
   fee: number;
+  /** 加在 fee 上面的稅率（%）。省略＝0。 */
+  taxPct?: number;
   currency: string;
   billingCycle: "monthly" | "yearly";
   billingDay: number;
   billingMonth?: number | null;
   note?: string | null;
+  /** 複查日 YYYY-MM-DD。空字串或 null＝不設。 */
+  reviewAt?: string | null;
+  /** 海外交易。省略＝還沒確認（null），不是 false。 */
+  overseas?: boolean | null;
 }): Promise<SubscriptionRow | null> {
   try {
     const client = getPool();
     const { rows } = await client.query(
       `INSERT INTO costscale.subscriptions
-         (service, plan, fee, currency, billing_cycle, billing_day, billing_month, note)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         (service, plan, fee, tax_pct, currency, billing_cycle, billing_day, billing_month, note, review_at, overseas)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11)
        RETURNING *`,
       [
         input.service,
         input.plan ?? null,
         input.fee,
+        input.taxPct ?? 0,
         input.currency,
         input.billingCycle,
         input.billingDay,
         input.billingCycle === "yearly" ? (input.billingMonth ?? 1) : null,
         input.note ?? null,
+        input.reviewAt || null,
+        // 非台幣必然是海外交易，沒指定就自己填 true；台幣沒指定就是「還沒確認」。
+        input.overseas ?? (input.currency.toUpperCase() !== "TWD" ? true : null),
       ]
     );
     return (rows[0] as SubscriptionRow) ?? null;
@@ -1484,12 +1550,15 @@ export async function patchSubscription(
     service?: string;
     plan?: string | null;
     fee?: number;
+    taxPct?: number;
     currency?: string;
     billingCycle?: "monthly" | "yearly";
     billingDay?: number;
     billingMonth?: number | null;
     status?: string;
     note?: string | null;
+    reviewAt?: string | null;
+    overseas?: boolean | null;
   }
 ): Promise<SubscriptionRow | null> {
   const sets: string[] = [];
@@ -1501,12 +1570,19 @@ export async function patchSubscription(
   if (patch.service !== undefined) push("service", patch.service);
   if (patch.plan !== undefined) push("plan", patch.plan);
   if (patch.fee !== undefined) push("fee", patch.fee);
+  if (patch.taxPct !== undefined) push("tax_pct", patch.taxPct);
   if (patch.currency !== undefined) push("currency", patch.currency);
   if (patch.billingCycle !== undefined) push("billing_cycle", patch.billingCycle);
   if (patch.billingDay !== undefined) push("billing_day", patch.billingDay);
   if (patch.billingMonth !== undefined) push("billing_month", patch.billingMonth);
   if (patch.status !== undefined) push("status", patch.status);
   if (patch.note !== undefined) push("note", patch.note);
+  if (patch.overseas !== undefined) push("overseas", patch.overseas);
+  if (patch.reviewAt !== undefined) {
+    // 空字串是「清掉複查日」，不是「不要動它」——前端把欄位清空就是這個意思。
+    vals.push(patch.reviewAt || null);
+    sets.push(`review_at = $${vals.length}::date`);
+  }
   if (!sets.length) return null;
 
   vals.push(id);
@@ -2465,10 +2541,35 @@ export async function listReminders(daysAhead = 7): Promise<Reminder[]> {
       });
     }
 
+    // 訂閱自己的複查日（db/init/31）。與上面 apps 的那一條是兩回事：
+    // 那條問「這個軟體還要不要繼續用付費 AI」，這條問「這筆訂閱的方案要不要改回去」。
+    //
+    // **這個提醒有硬期限**：排程在扣款日當天 05:20 用當下的 fee 凍結，
+    // 過了那一刻才改，凍下去的金額就是錯的，而自動凍的那筆介面上刪不掉。
+    // 所以 detail 要把扣款日一起講出來，光說「該複查了」沒有回答「什麼時候之前」。
+    const { rows: subReviews } = await client.query(
+      `SELECT service, plan, billing_day,
+              (review_at - CURRENT_DATE) AS days
+         FROM costscale.subscriptions
+        WHERE status = 'active'
+          AND review_at IS NOT NULL
+          AND review_at <= CURRENT_DATE + ($1 || ' days')::interval
+        ORDER BY review_at`,
+      [daysAhead]
+    );
+    for (const r of subReviews) {
+      out.push({
+        kind: "review",
+        name: `${r.service}${r.plan ? ` · ${r.plan}` : ""}`,
+        days: Number(r.days),
+        detail: `訂閱方案複查日 · 要改的話得趕在每月 ${r.billing_day} 日扣款前`,
+      });
+    }
+
     // 年繳的下次扣款日。billing_month/billing_day 組出今年的日期，
     // 已經過了就算明年。
     const { rows: subs } = await client.query(
-      `SELECT service, billing_month, billing_day, fee, currency,
+      `SELECT service, billing_month, billing_day, fee, tax_pct, currency,
               (CASE
                  WHEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, billing_month, billing_day)
                       >= CURRENT_DATE
@@ -2489,7 +2590,11 @@ export async function listReminders(daysAhead = 7): Promise<Reminder[]> {
           kind: "billing",
           name: s.service,
           days,
-          detail: `年繳續約，${s.currency} ${Number(s.fee).toLocaleString("zh-TW")}`,
+          // 提醒要講的是「會被扣多少」，所以顯示含稅的實付金額，不是牌價。
+          detail: `年繳續約，${s.currency} ${payableFee(
+            Number(s.fee) || 0,
+            Number(s.tax_pct) || 0
+          ).toLocaleString("zh-TW", { maximumFractionDigits: 2 })}`,
         });
       }
     }
@@ -3099,8 +3204,9 @@ export async function getSubscriptionSavings(
       }))
       .filter((r) => r.input + r.output + r.cacheRead + r.cacheWrite > 0);
 
+    const markupPct = await getMarkupPct();
     const subs = await client.query(
-      `SELECT service, fee, currency, billing_cycle
+      `SELECT service, fee, tax_pct, currency, billing_cycle, overseas
          FROM costscale.subscriptions WHERE status = 'active'`
     );
 
@@ -3123,16 +3229,74 @@ export async function getSubscriptionSavings(
     const chargedOf = new Map<string, number>();
     for (const r of charged.rows) chargedOf.set(String(r.service), Number(r.twd) || 0);
 
+    // 區間內沒有扣款紀錄時要用的「當時方案價」（2026-09-21）。
+    //
+    // 在這之前這裡退回的是 **subscriptions.fee，也就是現在的月費**。
+    // 那代表升級之後回頭看「最近七天」或任何不含扣款日的區間，
+    // 升級前的日子會被用升級後的價格解釋——跟上面那段剛修掉的問題是同一個，
+    // 只是躲在 else 分支裡，所以 2026-09-21 那一輪沒有一起修到。
+    //
+    // 取的是**區間開始之前最近一筆自動扣款**的 fee。三個刻意的選擇：
+    //   1. 只看 source = 'auto'。人工補的是升級差額、漏記的一筆，
+    //      金額不是月費；拿它當月費會讓那段期間的成本暴增。
+    //   2. 比的是 from 不是 to。要的是「這段期間開始時，方案價是多少」。
+    //   3. 幣別與週期用快照那筆的，但**匯率用現在的**——這是一個未發生扣款的
+    //      估算區間，估算本來就該用最新匯率（與這個面板一直以來的行為相同）。
+    const lastAuto = await client.query(
+      `SELECT DISTINCT ON (s.service)
+              s.service, c.fee, c.tax_pct, c.currency, s.billing_cycle, s.overseas
+         FROM costscale.subscription_charges c
+         JOIN costscale.subscriptions s ON s.id = c.sub_id
+        WHERE c.source = 'auto' AND c.charged_on < $1::date
+        ORDER BY s.service, c.charged_on DESC`,
+      [from]
+    );
+    const lastAutoOf = new Map<
+      string,
+      { fee: number; taxPct: number; currency: string; cycle: string; overseas: boolean | null }
+    >();
+    for (const r of lastAuto.rows) {
+      lastAutoOf.set(String(r.service), {
+        fee: Number(r.fee) || 0,
+        // 稅率也要取快照那筆的。稅率會變，用現在的去算舊區間是同一個病。
+        taxPct: Number(r.tax_pct) || 0,
+        currency: String(r.currency),
+        cycle: String(r.billing_cycle),
+        // overseas 取現況：它是「這個商家在不在海外」，不會像價格那樣逐期變動。
+        overseas: r.overseas as boolean | null,
+      });
+    }
+
     const feeOf = (service: string): number => {
       // 這段期間有實際扣款紀錄就用它——那是當時真的付的錢。
       const actual = chargedOf.get(service);
       if (actual !== undefined && actual > 0) return actual;
-      // 沒有就退回現在的月費。看「最近七天」這種不含扣款日的區間會走到這裡，
-      // 給的是整月月費——與這個面板一直以來的行為相同（月費不按日拆）。
+      // 沒有扣款紀錄：用這段期間開始前最近一筆自動扣款的方案價。
+      // 月費一樣不按日拆，給的是整月月費——這一點沒有改。
+      const snap = lastAutoOf.get(service);
+      if (snap && snap.fee > 0) {
+        return monthlyTwdOf({
+          fee: snap.fee,
+          taxPct: snap.taxPct,
+          cycle: snap.cycle,
+          currency: snap.currency,
+          overseas: snap.overseas,
+          fxWithMarkup: fxRate,
+          markupPct,
+        });
+      }
+      // 連一筆自動扣款都還沒有（剛登記、還沒到第一個扣款日）才退回現在的月費。
       const row = subs.rows.find((s) => String(s.service) === service);
       if (!row) return 0;
-      const perMonth = monthlyEquivalentFee(Number(row.fee) || 0, String(row.billing_cycle));
-      return String(row.currency) === "TWD" ? perMonth : perMonth * fxRate;
+      return monthlyTwdOf({
+        fee: Number(row.fee) || 0,
+        taxPct: Number(row.tax_pct) || 0,
+        cycle: String(row.billing_cycle),
+        currency: String(row.currency),
+        overseas: row.overseas as boolean | null,
+        fxWithMarkup: fxRate,
+        markupPct,
+      });
     };
 
     const build = (
@@ -3196,6 +3360,55 @@ export async function getSubscriptionSavings(
 /** 年繳折成月。與 lib/format 的 monthlyEquivalent 同一套規則，這裡吃字串型別的 cycle。 */
 function monthlyEquivalentFee(fee: number, cycle: string): number {
   return cycle === "yearly" ? fee / 12 : fee;
+}
+
+/**
+ * 未稅牌價 → 原幣實付（2026-09-21，db/init/30）。
+ *
+ * 這是整套訂閱金額唯一的入稅點。任何拿 `subscriptions.fee` 或
+ * `subscription_charges.fee` 去算錢的地方都要先經過它，
+ * 否則那個數字會少一個稅——2026-09-21 之前全站都少了 5%。
+ *
+ * 稅加在換匯**之前**：供應商用原幣開稅額，先換匯再加稅會差一個匯率的尾數。
+ */
+export function payableFee(fee: number, taxPct: number): number {
+  return fee * (1 + (taxPct || 0) / 100);
+}
+
+/**
+ * 訂閱的每月台幣等值（2026-09-22，db/init/32）。
+ *
+ * **換不換匯看幣別，收不收國外交易服務費看商家在不在海外，是兩件事。**
+ * 在這之前全站寫的都是 `currency === 'TWD' ? x : x * fx`，
+ * 於是台幣計價的海外訂閱（OpenAI 的 TWD 690）完全沒算到那 1.5%。
+ *
+ * `fxWithMarkup` 是 getFxRate().rate，**本身已含手續費**，所以非台幣那條路
+ * 不要再乘一次。台幣那條路沒有匯率可以夾帶，才需要 markupPct。
+ *
+ * overseas 為 null（還沒確認）時當作不收——不要憑空生出一筆費用。
+ */
+export function monthlyTwdOf(input: {
+  fee: number;
+  taxPct: number;
+  cycle: string;
+  currency: string;
+  overseas: boolean | null;
+  fxWithMarkup: number;
+  markupPct: number;
+}): number {
+  const perMonth = monthlyEquivalentFee(
+    payableFee(input.fee, input.taxPct),
+    input.cycle
+  );
+  // 非台幣必然是海外交易，而 fxWithMarkup 已經把服務費含進去了。
+  if (input.currency !== "TWD") return perMonth * input.fxWithMarkup;
+  return input.overseas === true ? perMonth * (1 + input.markupPct / 100) : perMonth;
+}
+
+/** settings.fx_markup_pct，取不到當 0。上面那支算台幣海外交易時要用。 */
+export async function getMarkupPct(): Promise<number> {
+  const settings = await getSettings();
+  return Number(settings.fx_markup_pct) || 0;
 }
 
 export function combineAllSourceTokens(

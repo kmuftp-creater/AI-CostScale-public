@@ -12,6 +12,7 @@ import {
   getCliUsageSummary,
   combineAllSourceTokens,
   getSubscriptionSavings,
+  monthlyTwdOf,
 } from "@/lib/db";
 import {
   formatUsd,
@@ -19,7 +20,6 @@ import {
   formatTokens,
   formatTokensZh,
   last4,
-  monthlyEquivalent,
 } from "@/lib/format";
 import { resolveRange } from "@/lib/range";
 import { listQuotaPoolsLive } from "@/lib/keys";
@@ -71,6 +71,7 @@ export default async function OverviewPage({
       // 「總 Token」那格要算的是 User 所有的使用量，不是只有經過閘道的那一小塊。
       // 閘道的量在這個月是 284 萬，而 Claude Code 與 Codex 直接用掉的是幾十億——
       // 只顯示前者會讓那格看起來永遠不動（2026-08-29 User 回報）。
+      // Claude Code 與 Codex 都讀本機收集器那張表；OTel 遙測只收得到約四成，這格不再用（2026-09-18）。
       getCliUsageSummary(new Date(range.from), new Date(range.to)),
       // 「訂閱省下多少」：實際用掉的 token × 官方 API 價目 − 月費。
       getSubscriptionSavings(new Date(range.from), new Date(range.to), fxRate.rate),
@@ -93,10 +94,22 @@ export default async function OverviewPage({
 
   const activeSubs = subscriptions.filter((s) => s.status === "active");
   // 年繳的 fee 是年費，先換算成每月等值再加總，否則一筆年繳會被當成十二倍。
-  const subTotalTwd = activeSubs.reduce((sum, s) => {
-    const perMonth = monthlyEquivalent(Number(s.fee) || 0, s.billing_cycle);
-    return sum + (s.currency === "TWD" ? perMonth : perMonth * fx);
-  }, 0);
+  // 入稅、折月、換匯、國外交易服務費全在 monthlyTwdOf 一支裡（db/init/30、32）。
+  // 自己拆開算過兩次都漏東西：第一次漏 VAT、第二次漏台幣海外交易的服務費。
+  const subTotalTwd = activeSubs.reduce(
+    (sum, s) =>
+      sum +
+      monthlyTwdOf({
+        fee: Number(s.fee) || 0,
+        taxPct: Number(s.tax_pct) || 0,
+        cycle: s.billing_cycle,
+        currency: s.currency,
+        overseas: s.overseas,
+        fxWithMarkup: fx,
+        markupPct: fxRate.markupPct,
+      }),
+    0
+  );
 
   // 金鑰→軟體的對照表**要含換過的舊金鑰**（2026-08-30 修）。
   // 只比 vkey_id 的話，換過鑰的軟體整批對不回來、掉進最後那列「開發測試」。

@@ -23,6 +23,8 @@ export default async function SubscriptionsPage() {
         // 現在的牌告匯率（未加手續費）。扣款歷史要拿它跟凍結值比，
         // 所以不能用上面那個已經含手續費的 fxRate.rate。
         fxBase={fxRate.baseRate}
+        // 台幣計價的海外訂閱要單獨乘服務費——它沒有匯率可以夾帶（db/init/32）。
+        markupPct={fxRate.markupPct}
         fxDay={fxRate.day}
         fxStale={fxRate.stale}
       />

@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  *
  * 【backendModel 是 2026-09-21 加的】
  *
- * User 在 Auto Line 的模型下拉看到 `gemini-smart`、`gemini-fast`，說
+ * User 在 app-c 的模型下拉看到 `gemini-smart`、`gemini-fast`，說
  * 「不會有人知道他實際是哪個模型阿」——他是對的。閘道的 `/v1/models` 是
  * OpenAI 格式，只有 `id` 一個欄位，**沒有地方放真實模型**，所以任何讀那條的
  * 介面都只看得到部署名。
