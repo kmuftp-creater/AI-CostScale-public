@@ -9,8 +9,14 @@ import { Fragment } from "react";
 import {
   readUpstreamModels,
   catalogFor,
+  catalogId,
   checkDeployments,
+  groupModels,
+  isExpiringSoon,
+  expiryText,
   unusedModels,
+  STAGE_LABEL,
+  type ModelMeta,
   type UpstreamModels,
 } from "@/lib/upstream-models";
 
@@ -64,12 +70,45 @@ function groupSizes(rows: UpstreamKeyRow[]): Map<string, number> {
   return m;
 }
 
-/** 一把金鑰底下那一列「可用模型」（2026-09-21）。重點是標出閘道在用、但供應商清單已經沒有的那幾個。 */
+/**
+ * 一把金鑰底下那一列「可用模型」（2026-09-21）。
+ *
+ * 要回答 User 的原話：「有的模型會過時…我要避免用到，所以他們可以載入模型去看」，
+ * 以及後來補的兩點：「已經停用的就不用顯示」、「模型該分類，使用者不一定清楚該用什麼」。
+ *
+ * 所以這裡的規則是：
+ *   - 金鑰查不動（多半是已失效）→ 整列不畫。那把金鑰的狀態在上面那一列講就好。
+ *   - 清單只列**供應商現在還有的**，依文字／生圖／語音／影片／嵌入分組。
+ *   - 已經消失、或有到期日的，只在最上面那塊「要處理」出現，而且**只講閘道真的在用的**——
+ *     供應商下架一個我們從來沒用過的模型，不是待辦事項。
+ */
+function ModelPill({ m, used }: { m: ModelMeta; used: boolean }) {
+  const soon = isExpiringSoon(m.expires);
+  const stage = STAGE_LABEL[m.stage];
+  return (
+    <span className={`m-pill${used ? " m-used" : ""}`} title={m.label || undefined}>
+      <code>{m.id}</code>
+      {m.tags.length > 0 ? <span className="m-tag">{m.tags.join("·")}</span> : null}
+      {stage ? <span className="m-tag">{stage}</span> : null}
+      {m.expires ? (
+        <span className={soon ? "m-exp k-gone" : "m-exp"}>{m.expires.slice(5)} 停用</span>
+      ) : null}
+    </span>
+  );
+}
+
 function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels }) {
   const cat = catalogFor(data, row.envName);
-  const checks = checkDeployments(cat, row.deployments);
+  // 失效的金鑰不畫模型清單（User：「已經停用的金鑰，就不用顯示就好了啊」）。
+  if (cat && !cat.ok) return null;
+
+  const checks = checkDeployments(data, cat, row.deployments);
   const gone = checks.filter((c) => c.present === false);
+  const expiring = checks.filter((c) => c.meta && isExpiringSoon(c.meta.expires));
+  const groups = groupModels(data, cat, cat?.models ?? []);
+  const used = new Set(checks.map((c) => catalogId(c.backendModel)));
   const unused = unusedModels(cat, row.deployments);
+  const todo = gone.length + expiring.length;
 
   return (
     <tr className="k-models">
@@ -78,10 +117,12 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
           <summary>
             可用模型
             {cat?.ok ? ` ${cat.count} 個` : ""}
-            {gone.length > 0 ? (
-              <strong className="k-gone"> · {gone.length} 個閘道在用的已從供應商清單消失</strong>
+            {cat?.ok && groups.length > 0 ? (
+              <span className="m-sum">
+                （{groups.map((g) => `${g.group} ${g.items.length}`).join("／")}）
+              </span>
             ) : null}
-            {cat && !cat.ok ? <strong className="k-gone"> · 查詢失敗</strong> : null}
+            {todo > 0 ? <strong className="k-gone"> · {todo} 個要處理</strong> : null}
             {!cat ? " · 尚未抓取" : ""}
           </summary>
           {!cat ? (
@@ -89,28 +130,42 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
               還沒有這把金鑰的清單。主機端排程每 6 小時抓一次
               （<code>scripts/fetch-upstream-models.py</code>）。
             </p>
-          ) : !cat.ok ? (
-            <p className="k-note">
-              <strong className="k-gone">向供應商查詢失敗</strong>：{cat.error}
-              <br />
-              多半是這把金鑰已經失效。閘道輪替時不會跳過壞掉的那一把，留著會變成間歇性失敗。
-            </p>
           ) : (
             <>
-              <p className="k-note">
-                閘道用到 {checks.length} 個：
-                {checks.map((c) => (
-                  <span key={c.backendModel} className={c.present === false ? "k-gone" : undefined}>
-                    {" "}
-                    {c.backendModel}
-                    {c.present === false ? "（供應商已無）" : c.present === null ? "（萬用）" : ""}
+              {todo > 0 ? (
+                <div className="m-todo">
+                  {gone.map((c) => (
+                    <p key={c.backendModel} className="k-note">
+                      <strong className="k-gone">要換掉</strong>：閘道的{" "}
+                      <code>{c.modelName}</code> 打的是 <code>{c.backendModel}</code>，
+                      <strong>供應商清單上已經沒有這一支</strong>。
+                    </p>
+                  ))}
+                  {expiring.map((c) => (
+                    <p key={c.backendModel} className="k-note">
+                      <strong className="k-gone">快到期</strong>：閘道的{" "}
+                      <code>{c.modelName}</code>（<code>{c.backendModel}</code>）
+                      ——{expiryText(c.meta as ModelMeta)}。
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+
+              {groups.map((g) => (
+                <p key={g.group} className="k-note m-group">
+                  <span className="m-head">
+                    {g.group} {g.items.length}
                   </span>
-                ))}
-              </p>
-              <p className="k-note">
-                這把金鑰還能用、但閘道沒開的有 {unused.length} 個
-                {unused.length > 0 ? `：${unused.slice(0, 40).join("、")}` : ""}
-                {unused.length > 40 ? ` 等 ${unused.length} 個` : ""}
+                  {g.items.slice(0, 24).map((m) => (
+                    <ModelPill key={m.id} m={m} used={used.has(m.id)} />
+                  ))}
+                  {g.items.length > 24 ? <span className="m-more">等 {g.items.length} 個</span> : null}
+                </p>
+              ))}
+
+              <p className="k-note m-foot">
+                粗體＝閘道正在用的（{checks.length} 個）。這把金鑰還能用、但閘道還沒開的有 {unused.length} 個。
+                「停用」日期只有 OpenRouter 會直說，其他家是拿同名模型交叉參考來的，不是原廠公告。
               </p>
             </>
           )}
@@ -147,6 +202,13 @@ function KeyTable({ rows, upstream }: { rows: UpstreamKeyRow[]; upstream: Upstre
                   {k.slot ? ` · 第 ${k.slot}／${k.poolSize} 把` : ""} · {shown}
                   {more}
                   {missing > 0 ? ` · ${missing} 個部署閘道未載入` : ""}
+                  {/* 失效的金鑰要講在這裡：閘道輪替不會跳過壞掉的那一把（2026-09-21）。 */}
+                  {(() => {
+                    const c = catalogFor(upstream, k.envName);
+                    return c && !c.ok ? (
+                      <strong className="k-gone"> · 金鑰已失效，請移除或換一把</strong>
+                    ) : null;
+                  })()}
                 </small>
               </td>
               <td className={`t-kind ${PRICING_CLASS[k.pricing]}`}>〔{PRICING_LABEL[k.pricing]}〕</td>

@@ -2182,3 +2182,31 @@ td.t-act button {
 .model-opt code { font-size: 0.8rem; }
 .model-default { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; font-size: 0.86rem; }
 .model-default select { padding: 5px 8px; min-width: 210px; }
+
+/* 可用模型：依分類分組的清單（2026-09-21，User：「模型是否該分類」） */
+.ledger tr.k-models .m-sum { color: var(--muted); font-weight: 400; }
+.ledger tr.k-models .m-todo {
+  margin: 8px 0 10px; padding: 8px 10px 4px;
+  border-left: 2px solid var(--crit); background: var(--crit-dim);
+}
+.ledger tr.k-models .m-todo .k-note { margin: 0 0 6px; color: var(--ink-2); }
+.ledger tr.k-models .m-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.ledger tr.k-models .m-head {
+  min-width: 62px; font-weight: 600; color: var(--ink-2);
+  font-size: 0.78rem; letter-spacing: 0.04em;
+}
+.ledger tr.k-models .m-pill { display: inline-flex; align-items: baseline; gap: 4px; }
+.ledger tr.k-models .m-pill code { font-size: 0.78rem; color: var(--muted); }
+.ledger tr.k-models .m-pill.m-used code { color: var(--ink); font-weight: 700; }
+.ledger tr.k-models .m-tag,
+.ledger tr.k-models .m-exp,
+.ledger tr.k-models .m-more { font-size: 0.7rem; color: var(--muted); }
+.ledger tr.k-models .m-exp { color: var(--warn); }
+.ledger tr.k-models .m-foot { color: var(--muted); font-size: 0.75rem; }
+
+/* 模型設定對話框：勾選清單也分組（2026-09-21） */
+.model-group-head {
+  grid-column: 1 / -1; margin: 6px 0 2px; font-size: 0.76rem; font-weight: 600;
+  letter-spacing: 0.06em; color: var(--ink-2); border-bottom: 1px solid var(--line);
+}
+.model-opt .m-hint { font-size: 0.7rem; color: var(--muted); }

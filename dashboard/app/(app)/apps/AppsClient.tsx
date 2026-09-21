@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
+import { groupDeployments, KIND_HINT } from "@/lib/model-kind";
 import { last4, formatTokens, formatUsd, formatTwd, formatTaipei } from "@/lib/format";
 
 type AppRow = {
@@ -663,20 +664,28 @@ export default function AppsClient({
               取消勾選的模型，那個專案打過去會收到 HTTP 403。
               訂閱通道（<code>sub-</code> 開頭）不在這裡設定，那要走下面的「訂閱橋接」面板。
             </div>
+            {/* 依用途分組（2026-09-21）：使用者不一定知道哪個名字是圖片、哪個是語音。 */}
             <div className="model-pick">
-              {gatewayModels.map((m) => (
-                <label key={m} className="model-opt">
-                  <input
-                    type="checkbox"
-                    checked={modelAllowed.includes(m)}
-                    onChange={(e) =>
-                      setModelAllowed((prev) =>
-                        e.target.checked ? [...prev, m] : prev.filter((x) => x !== m)
-                      )
-                    }
-                  />
-                  <code>{m}</code>
-                </label>
+              {groupDeployments(gatewayModels).map((g) => (
+                <Fragment key={g.group}>
+                  <div className="model-group-head" title={KIND_HINT[g.group]}>
+                    {g.group}　<span style={{ fontWeight: 400 }}>{KIND_HINT[g.group]}</span>
+                  </div>
+                  {g.items.map((m) => (
+                    <label key={m} className="model-opt">
+                      <input
+                        type="checkbox"
+                        checked={modelAllowed.includes(m)}
+                        onChange={(e) =>
+                          setModelAllowed((prev) =>
+                            e.target.checked ? [...prev, m] : prev.filter((x) => x !== m)
+                          )
+                        }
+                      />
+                      <code>{m}</code>
+                    </label>
+                  ))}
+                </Fragment>
               ))}
             </div>
             <div className="limit-cur" role="group" aria-label="快速選取">
@@ -691,10 +700,14 @@ export default function AppsClient({
               預設模型（選填）
               <select value={modelDefault} onChange={(e) => setModelDefault(e.target.value)}>
                 <option value="">不指定</option>
-                {modelAllowed.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
+                {groupDeployments(modelAllowed).map((g) => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.items.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </label>

@@ -146,19 +146,26 @@ model_list:
     model_info:
       pricing_type: payg
 
-  - model_name: gemini-2.5-flash-image
+  # 2026-09-21 移除 gemini-2.5-flash-image：Vertex 的模型清單上已經沒有這一支，
+  # 留著會在呼叫時回 404。用上面的 gemini-3.1-flash-image 取代。
+
+  # ══ 嵌入向量（只有 OpenAI 格式 /v1/embeddings 可用；
+  #    Gemini 原生 :embedContent 在 LiteLLM 沒有對應路由，會 404）══
+  # 部署名要用供應商真的有的名字：萬用部署 gemini-* 會把請求的名字原封不動送去 Vertex，
+  # 自創一個 gemini-embedding 會被它攔走，然後回 404（2026-09-21 實測）。
+  - model_name: gemini-embedding-2
     litellm_params:
-      model: vertex_ai/gemini-2.5-flash-image
+      model: vertex_ai/gemini-embedding-2
       vertex_project: os.environ/VERTEX_PROJECT
       vertex_location: global
     model_info:
       pricing_type: payg
 
-  # ══ 嵌入向量（只有 OpenAI 格式 /v1/embeddings 可用；
-  #    Gemini 原生 :embedContent 在 LiteLLM 沒有對應路由，會 404）══
+  # 2026-09-21：Vertex 清單上已經沒有 gemini-embedding-001，改指向 gemini-embedding-2。
+  # 部署名留著是為了不讓寫死舊名字的專案斷掉；新專案請用上面的 gemini-embedding-2。
   - model_name: gemini-embedding-001
     litellm_params:
-      model: vertex_ai/gemini-embedding-001
+      model: vertex_ai/gemini-embedding-2
       vertex_project: os.environ/VERTEX_PROJECT
       vertex_location: global
     model_info:
