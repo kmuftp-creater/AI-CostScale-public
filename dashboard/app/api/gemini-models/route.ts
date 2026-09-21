@@ -35,6 +35,30 @@ function supportedMethods(id: string): string[] {
   return base;
 }
 
+/**
+ * 後端模型名 → 給人看的供應商名稱。
+ *
+ * 為什麼要有（2026-09-21）：同一個型號在 Vertex AI 與 AI Studio 都有，
+ * 但那是兩本帳、兩種額度、兩把金鑰。專案端只看到型號，等於不知道這筆錢會記到哪。
+ * `openai/` 有兩種：真的 OpenAI，以及走家用主機的訂閱橋接（靠 api_base 分辨）。
+ */
+function providerLabel(backend: string | null, apiBase?: string): string | null {
+  if (!backend) return null;
+  const head = backend.slice(0, backend.indexOf("/"));
+  if (head === "openai") return apiBase && apiBase.includes("8788") ? "訂閱橋接" : "OpenAI";
+  return (
+    {
+      vertex_ai: "Vertex AI",
+      gemini: "AI Studio",
+      groq: "Groq",
+      openrouter: "OpenRouter",
+      anthropic: "Anthropic",
+      deepseek: "DeepSeek",
+      xai: "xAI",
+    } as Record<string, string>
+  )[head] ?? (head || null);
+}
+
 export async function GET() {
   const baseUrl = process.env.LITELLM_BASE_URL;
   const masterKey = process.env.LITELLM_MASTER_KEY;
@@ -64,6 +88,7 @@ export async function GET() {
     // 問不到就退回「沒有這一欄」，不要讓整條路由因為附加資訊而失敗——
     // 呼叫端要的主體是「有哪些模型可用」。
     const backendOf = new Map<string, string>();
+    const apiBaseOf = new Map<string, string>();
     try {
       const info = await fetch(`${baseUrl}/model/info`, {
         headers: { Authorization: `Bearer ${masterKey}` },
@@ -72,13 +97,16 @@ export async function GET() {
       });
       if (info.ok) {
         const j = (await info.json()) as {
-          data?: { model_name?: string; litellm_params?: { model?: string } }[];
+          data?: { model_name?: string; litellm_params?: { model?: string; api_base?: string } }[];
         };
         for (const m of j.data ?? []) {
           const n = m.model_name;
           const b = m.litellm_params?.model;
           if (typeof n === "string" && typeof b === "string" && !backendOf.has(n)) {
             backendOf.set(n, b);
+            if (typeof m.litellm_params?.api_base === "string") {
+              apiBaseOf.set(n, m.litellm_params.api_base);
+            }
           }
         }
       }
@@ -94,10 +122,21 @@ export async function GET() {
       .sort()
       .map((id) => {
         const backend = backendOf.get(id) ?? null;
+        const provider = providerLabel(backend, apiBaseOf.get(id));
         // 去掉供應商前綴給人看：vertex_ai/gemini-3.8-flash → gemini-3.8-flash。
         // 完整值留在 backendModel，需要分辨供應商的人拿得到。
         const shortName = backend ? backend.slice(backend.indexOf("/") + 1) : null;
         const isAlias = backend !== null && shortName !== id;
+        // 供應商要寫出來（2026-09-21，User：「在各專案我怎麼會知道哪一支是 Vertex AI 的」）。
+        // 同一個型號在 Vertex 與 AI Studio 都有，計費帳本、額度、金鑰來源完全不同，
+        // 只給型號等於沒回答「這筆錢會記到哪」。
+        const label = provider
+          ? isAlias
+            ? `${id}（${provider} · ${shortName}）`
+            : `${id}（${provider}）`
+          : isAlias
+            ? `${id}（${shortName}）`
+            : id;
         return {
           name: `models/${id}`,
           displayName: id,
@@ -105,8 +144,10 @@ export async function GET() {
           // ── 以下為 AI CostScale 的擴充欄位（2026-09-21）──
           /** 這個名字實際打到的上游模型，含供應商前綴。問不到閘道時是 null。 */
           backendModel: backend,
-          /** 給人看的一行字。介面直接拿去顯示就不會有人問「這是哪個模型」。 */
-          label: isAlias ? `${id}（${shortName}）` : id,
+          /** 供應商的中文名（Vertex AI／AI Studio／Groq／OpenRouter／訂閱橋接）。問不到是 null。 */
+          provider,
+          /** 給人看的一行字。介面直接拿去顯示就不會有人問「這是哪個模型、哪一家」。 */
+          label,
           /** true＝這是用途別名，名字跟實際模型不同，換模型時不必改專案。 */
           isAlias,
         };

@@ -2536,7 +2536,19 @@ export type BoardProject = {
    */
   lastPushedAt: string;
   reactivated: boolean;
-  sortKey: string;
+  /**
+   * 排序用的時間戳（毫秒）。取「這張卡最近一次有動靜」的那個時間。
+   *
+   * 2026-09-21 修：原本是字串且取 `pushed_at`——但那個欄位的語意是
+   * **「這張卡第一次出現的時間」**（push 路由刻意用 COALESCE 保留第一次的值），
+   * 於是看板其實是按「卡片建立順序」排的，不是按「誰最近有更新」。
+   * User：「專案看板不是有更新的會排在最前面嗎？為何我看他都不會動」。
+   *
+   * 現在取 updated_at（status.json 寫的內容日期）與 last_pushed_at（實際收到推送的時間）
+   * 之中較晚的那個。用數字不用字串：內容日期有的寫 "2026-09-21"、有的寫
+   * "2026-09-21T16:30:00+08:00"，字串比大小會讓只寫日期的那張永遠排在同一天有時間的後面。
+   */
+  sortKey: number;
 };
 
 export type BoardData = {
@@ -2614,6 +2626,21 @@ function boardStrArr(v: unknown): string[] {
  *
  * 合併規則照搬 App Hub：GitHub 卡與草稿先進，本機推送同名覆蓋（推送最新）。
  */
+/**
+ * 一組時間字串裡最晚的那個，回毫秒。全部解析不出來就回 0。
+ * 日期格式混用（"2026-09-21" 與 "2026-09-21T16:30:00+08:00"）是常態，
+ * 所以一律轉成時間戳再比，不要用字串比大小。
+ */
+function tsOf(...values: (string | null | undefined)[]): number {
+  let best = 0;
+  for (const v of values) {
+    if (!v) continue;
+    const t = Date.parse(String(v));
+    if (Number.isFinite(t) && t > best) best = t;
+  }
+  return best;
+}
+
 export async function getBoardData(): Promise<BoardData> {
   try {
     const client = getPool();
@@ -2710,7 +2737,7 @@ export async function getBoardData(): Promise<BoardData> {
         reactivated,
         // GitHub 來源的卡不是靠推送進來的，這一欄不適用。
         lastPushedAt: "",
-        sortKey: lastActivity || pushedAt || "",
+        sortKey: tsOf(lastActivity, pushedAt),
       };
     });
 
@@ -2748,7 +2775,9 @@ export async function getBoardData(): Promise<BoardData> {
         staleDays,
         reactivated: false,
         lastPushedAt,
-        sortKey: pushedAt || r.updated_at || createdAt || "",
+        // 「最近有動靜」＝內容日期與最後推送取較晚者。
+        // pushed_at 是第一次出現的時間，不能拿來排最近更新（2026-09-21 修）。
+        sortKey: tsOf(r.updated_at, lastPushedAt, createdAt),
       };
     });
 
@@ -2770,7 +2799,7 @@ export async function getBoardData(): Promise<BoardData> {
     all.sort((a, b) => {
       const r = rank(a.status) - rank(b.status);
       if (r !== 0) return r;
-      return String(b.sortKey).localeCompare(String(a.sortKey));
+      return b.sortKey - a.sortKey;
     });
 
     const syncedAt = gh.rows.length
