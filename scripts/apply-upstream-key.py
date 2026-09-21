@@ -333,6 +333,214 @@ def restart_gateway():
                    capture_output=True, text=True, timeout=300)
 
 
+BACKEND_RE = re.compile(r"^[a-z][a-z0-9_]*/[A-Za-z0-9._\-/:]+$")
+
+CATALOG_PROVIDER = {
+    "vertex_ai": "vertex", "gemini": "gemini", "groq": "groq", "openrouter": "openrouter",
+    "openai": "openai", "anthropic": "anthropic", "deepseek": "deepseek", "xai": "xai",
+}
+
+
+def find_entries_by_group(lines, model_name):
+    """該 model_name 的所有條目 [(起, 迄)]。邊界規則與 find_entries_by_env 相同。"""
+    spans = []
+    pat = r"^  - model_name:\s*['\"]?%s['\"]?\s*$" % re.escape(model_name)
+    for i, ln in enumerate(lines):
+        if not re.match(pat, ln.rstrip()):
+            continue
+        end = i + 1
+        while end < len(lines):
+            x = lines[end]
+            if x.strip() == "":
+                end += 1
+                continue
+            if re.match(r"^  - ", x) or re.match(r"^[^\s#]", x) or re.match(r"^ {0,3}#", x):
+                break
+            end += 1
+        spans.append((i, end))
+    return spans
+
+
+def env_pairs_all():
+    """整份 .env。只在記憶體用，不寫出去。"""
+    out = {}
+    try:
+        with open(ENV_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                v = v.strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                    v = v[1:-1]
+                out[k.strip()] = v
+    except Exception:
+        pass
+    return out
+
+
+def catalog_has(backend):
+    """新目標在供應商型錄裡存不存在。型錄抓不到回 None（不擋，但要講）。
+
+    型錄是 fetch-upstream-models.py 每 6 小時寫的 _models.json。
+    有它就擋得掉打錯字這種最常見的失誤——指到一個不存在的型號，
+    設定檔看起來完全正常，要等有人真的呼叫才會 404。
+    """
+    try:
+        with open(os.path.join(SPOOL, "_models.json"), encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    head, _, rest = backend.partition("/")
+    prov = CATALOG_PROVIDER.get(head)
+    if not prov:
+        return None
+    p = data.get("providers", {}).get(prov)
+    if not p:
+        return None
+    models = p.get("models", [])
+    return rest in models or backend in models
+
+
+def gateway_backend_of(model_name):
+    """閘道現在真的把這個部署名打到哪一支。問不到回 None。
+
+    **這一步不能省**（2026-09-21 的教訓）：改完設定檔重啟，只看健康檢查 200
+    是不夠的。那天我以為三項修改都上線了，實際上容器根本沒被重建、
+    閘道還在跑舊設定，而所有冒煙測試在舊設定下也會過。
+    要驗的是「改動本身生效了嗎」，不是「服務還活著嗎」。
+    """
+    if NO_RESTART:
+        return None
+    key = env_pairs_all().get("LITELLM_MASTER_KEY")
+    if not key:
+        return None
+    r = subprocess.run(["curl", "-s", "-m", "10", GATEWAY + "/model/info",
+                        "-H", "Authorization: Bearer " + key],
+                       capture_output=True, text=True)
+    try:
+        data = json.loads(r.stdout)
+    except Exception:
+        return None
+    for m in data.get("data", []):
+        if m.get("model_name") == model_name:
+            return (m.get("litellm_params") or {}).get("model")
+    return None
+
+
+def process_retarget(req_id, req):
+    """把某個部署名改成打另一支後端模型（2026-09-21）。
+
+    用途：供應商把模型下架或宣告停用時，在儀表板上換掉，不必 ssh 進來改檔案。
+
+    語意是「這個名字底下的每一筆都改」。像 gemini-flash-free 有五把金鑰輪替，
+    五筆指著同一支模型，只改一筆會變成一半新一半舊——那是最難查的狀態：
+    有時候成功有時候失敗，而且兩次呼叫的答案品質還不一樣。
+
+    四道擋：名字要存在、新目標格式要對、不能是萬用、不能跟現在一樣。
+    另外拿供應商型錄核對新目標存不存在（型錄抓不到就只警告不擋）。
+    """
+    model_name = (req.get("modelName") or "").strip()
+    backend = (req.get("backendModel") or "").strip()
+    if not model_name or "*" in model_name:
+        write_status(req_id, "failed", "部署名不合法：%s" % model_name)
+        return
+    if not BACKEND_RE.match(backend) or "*" in backend:
+        write_status(req_id, "failed",
+                     "新的後端模型要寫成「供應商/型號」，例如 vertex_ai/gemini-3.8-flash，"
+                     "而且不能含萬用字元。收到的是：%s" % backend,
+                     {"modelName": model_name})
+        return
+
+    with open(CFG_PATH, encoding="utf-8") as f:
+        lines = f.readlines()
+    spans = find_entries_by_group(lines, model_name)
+    if not spans:
+        write_status(req_id, "failed", "設定檔裡沒有叫 %s 的部署。" % model_name,
+                     {"modelName": model_name})
+        return
+
+    targets = []   # (行索引, 舊值, 縮排)
+    for start, end in spans:
+        for i in range(start, end):
+            m = re.match(r"^(\s+)model:\s*(\S+)\s*$", lines[i])
+            if m:
+                targets.append((i, m.group(2), m.group(1)))
+                break
+    if not targets:
+        write_status(req_id, "failed", "%s 的條目裡找不到 model: 那一行。" % model_name,
+                     {"modelName": model_name})
+        return
+
+    olds = {old for _i, old, _ind in targets}
+    if olds == {backend}:
+        write_status(req_id, "failed",
+                     "%s 本來就已經指向 %s，沒有要改的。" % (model_name, backend),
+                     {"modelName": model_name})
+        return
+
+    known = catalog_has(backend)
+    if known is False:
+        write_status(req_id, "failed",
+                     "供應商的模型清單裡沒有 %s。打錯字的話設定檔看起來完全正常，"
+                     "要等有人真的呼叫才會 404，所以這裡先擋下來。" % backend,
+                     {"modelName": model_name})
+        return
+    note = "（沒有供應商型錄可核對，新目標未經驗證）" if known is None else ""
+
+    cfg_bak = backup(CFG_PATH)
+    log("[%s] 換模型 %s：%s → %s（%d 處）備份：%s"
+        % (req_id, model_name, "、".join(sorted(olds)), backend, len(targets),
+           os.path.basename(cfg_bak)))
+
+    try:
+        for i, _old, indent in targets:
+            lines[i] = "%smodel: %s\n" % (indent, backend)
+        with open(CFG_PATH, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
+        try:
+            import yaml  # noqa
+            with open(CFG_PATH, encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+            hit = [m for m in (doc.get("model_list") or []) if m.get("model_name") == model_name]
+            if len(hit) != len(spans):
+                raise ValueError("改完之後 %s 的條目數不對（%d ≠ %d）"
+                                 % (model_name, len(hit), len(spans)))
+            for m in hit:
+                if (m.get("litellm_params") or {}).get("model") != backend:
+                    raise ValueError("改完之後還有條目沒指向 %s" % backend)
+        except ImportError:
+            log("[%s] 沒有 pyyaml，略過語法預檢" % req_id)
+
+        log("[%s] 重啟閘道…" % req_id)
+        restart_gateway()
+        if not gateway_ok():
+            raise RuntimeError("閘道重啟後 90 秒內沒有回到健康狀態")
+
+        live = gateway_backend_of(model_name)
+        if live is not None and live != backend:
+            raise RuntimeError("閘道重啟後 %s 仍然指向 %s，設定沒有生效" % (model_name, live))
+
+        write_status(req_id, "applied",
+                     "已把 %s 從 %s 改成 %s（共 %d 處）並重啟閘道，閘道確認已生效。%s"
+                     % (model_name, "、".join(sorted(olds)), backend, len(targets), note),
+                     {"modelName": model_name, "backendModel": backend})
+        log("[%s] 換模型成功：%s → %s" % (req_id, model_name, backend))
+
+    except Exception as e:
+        log("[%s] 換模型失敗，回滾：%s" % (req_id, e))
+        try:
+            shutil.copy2(cfg_bak, CFG_PATH)
+            restart_gateway()
+            ok = gateway_ok()
+            msg = "換模型失敗已回滾（閘道%s）：%s" % ("已恢復" if ok else "**仍不健康，要人工處理**", e)
+        except Exception as e2:
+            msg = "換模型失敗且回滾也失敗，要人工處理：%s ／ 回滾錯誤：%s" % (e, e2)
+        write_status(req_id, "failed", msg, {"modelName": model_name, "backendModel": backend})
+
+
 def process_remove(req_id, req):
     """把一把金鑰移出輪替：設定檔刪掉那一筆條目，`.env` 那一行改成註解。
 
@@ -433,6 +641,17 @@ def process(req_path):
     except Exception as e:
         write_status(req_id, "failed", "請求檔讀不到或不是合法 JSON：%s" % e)
         os.remove(req_path)
+        return
+
+    # 換模型走另一條路：它不碰 .env，只改設定檔裡的 model: 那一行。
+    if req.get("op") == "retarget":
+        try:
+            process_retarget(req_id, req)
+        finally:
+            try:
+                os.remove(req_path)
+            except Exception:
+                pass
         return
 
     # 移除走另一條路：它不需要 provider／金鑰，擋的條件也完全不同。

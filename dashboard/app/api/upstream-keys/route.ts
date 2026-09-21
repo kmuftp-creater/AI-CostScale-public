@@ -142,6 +142,50 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "請求 body 不是合法 JSON" }, { status: 400 });
   }
 
+  // ── 換部署後端：走同一條 spool（2026-09-21）────────────────────
+  // User：「裡面的模型要到期了，但我沒有看到可以更換的地方」。
+  // 在這之前，要把某個部署改成打另一支模型只能 ssh 進去改 litellm-config.yaml。
+  //
+  // 這裡只寫請求檔，實際的文字替換、重啟、驗證、失敗回滾都在主機端腳本，
+  // 理由與新增金鑰完全相同：對外的網頁應用不該拿到 docker 或設定檔的寫入權。
+  if (str(body.op, 20) === "retarget") {
+    const modelName = str(body.modelName, 80);
+    const backendModel = str(body.backendModel, 160);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$/.test(modelName) || modelName.includes("*")) {
+      return NextResponse.json({ error: `部署名不合法：${modelName}` }, { status: 400 });
+    }
+    if (!/^[a-z][a-z0-9_]*\/[A-Za-z0-9._\-/:]+$/.test(backendModel) || backendModel.includes("*")) {
+      return NextResponse.json(
+        { error: `新的後端模型要寫成「供應商/型號」，例如 vertex_ai/gemini-3.8-flash` },
+        { status: 400 }
+      );
+    }
+    const id = randomUUID();
+    try {
+      await mkdir(SPOOL, { recursive: true });
+      const tmp = path.join(SPOOL, `${id}.json.tmp`);
+      await writeFile(
+        tmp,
+        JSON.stringify({ id, op: "retarget", modelName, backendModel, createdAt: new Date().toISOString() }),
+        { encoding: "utf8", mode: 0o600 }
+      );
+      await rename(tmp, path.join(SPOOL, `${id}.json`));
+    } catch (e) {
+      return NextResponse.json(
+        { error: `寫入待套用佇列失敗：${e instanceof Error ? e.message : String(e)}` },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      id,
+      message:
+        `已排入佇列：把 ${modelName} 改成打 ${backendModel}。` +
+        "主機端每分鐘處理一次，套用時閘道會重啟數秒；" +
+        "套用後會實際去問閘道有沒有生效，沒生效或起不來會自動回滾。結果看上面的套用紀錄。",
+    });
+  }
+
   // ── 移除：走同一條 spool，但不需要 provider 也不需要金鑰 ──────────
   // （2026-09-09 補。原本只有新增，User 回報「網頁沒有設計介面讓我停用或刪除」。）
   if (str(body.op, 20) === "remove") {

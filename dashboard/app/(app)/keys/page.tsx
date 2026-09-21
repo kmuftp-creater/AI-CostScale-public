@@ -4,6 +4,7 @@ import { listQuotaPools } from "@/lib/db";
 import QuotaPoolsClient from "./QuotaPoolsClient";
 import AddUpstreamKeyClient from "./AddUpstreamKeyClient";
 import RemoveUpstreamKeyClient from "./RemoveUpstreamKeyClient";
+import RetargetModelClient, { type Candidate } from "./RetargetModelClient";
 import { formatTokens, formatTaipei, sinceNow } from "@/lib/format";
 import { Fragment } from "react";
 import {
@@ -15,7 +16,9 @@ import {
   isExpiringSoon,
   expiryText,
   unusedModels,
+  metaOf,
   STAGE_LABEL,
+  type ModelCheck,
   type ModelMeta,
   type UpstreamModels,
 } from "@/lib/upstream-models";
@@ -105,6 +108,32 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
   const checks = checkDeployments(data, cat, row.deployments);
   const gone = checks.filter((c) => c.present === false);
   const expiring = checks.filter((c) => c.meta && isExpiringSoon(c.meta.expires));
+
+  /**
+   * 「換掉」按鈕的候選清單（2026-09-21）。
+   *
+   * 只給**同一類**的：文字模型壞了要換文字模型，拿生圖的去頂替只會換來另一種故障。
+   * 分不出類別時（舊版抓取腳本寫的檔沒有 meta）就給全部，讓人自己判斷，
+   * 總比一個都不給好。上限 60 筆——再多就不是「挑一個」而是「大海撈針」。
+   */
+  const candidatesFor = (c: ModelCheck): Candidate[] => {
+    if (!cat?.ok) return [];
+    const want = c.meta?.group ?? null;
+    const out: Candidate[] = [];
+    for (const id of cat.models) {
+      const m = metaOf(data, cat, id);
+      if (want && m && m.group !== want) continue;
+      out.push({
+        id,
+        group: m?.group ?? "其他",
+        tags: m?.tags ?? [],
+        stage: m?.stage ?? "",
+        expires: m?.expires ?? "",
+      });
+      if (out.length >= 60) break;
+    }
+    return out;
+  };
   const groups = groupModels(data, cat, cat?.models ?? []);
   const used = new Set(checks.map((c) => catalogId(c.backendModel)));
   const unused = unusedModels(cat, row.deployments);
@@ -138,14 +167,24 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
                     <p key={c.backendModel} className="k-note">
                       <strong className="k-gone">要換掉</strong>：閘道的{" "}
                       <code>{c.modelName}</code> 打的是 <code>{c.backendModel}</code>，
-                      <strong>供應商清單上已經沒有這一支</strong>。
+                      <strong>供應商清單上已經沒有這一支</strong>。{" "}
+                      <RetargetModelClient
+                        modelName={c.modelName}
+                        currentBackend={c.backendModel}
+                        candidates={candidatesFor(c)}
+                      />
                     </p>
                   ))}
                   {expiring.map((c) => (
                     <p key={c.backendModel} className="k-note">
                       <strong className="k-gone">快到期</strong>：閘道的{" "}
                       <code>{c.modelName}</code>（<code>{c.backendModel}</code>）
-                      ——{expiryText(c.meta as ModelMeta)}。
+                      ——{expiryText(c.meta as ModelMeta)}。{" "}
+                      <RetargetModelClient
+                        modelName={c.modelName}
+                        currentBackend={c.backendModel}
+                        candidates={candidatesFor(c)}
+                      />
                     </p>
                   ))}
                 </div>
@@ -259,6 +298,7 @@ export default async function KeysPage() {
   const [inv, poolsRaw, upstreamModels] = await Promise.all([
     getKeyInventory(),
     listQuotaPools(),
+    // 主機端 cron 抓好寫在 spool 的清單。讀不到不影響這一頁的其他內容。
     readUpstreamModels(),
   ]);
   // 把數跟著閘道設定走，不用手填值（2026-09-12）
@@ -412,7 +452,12 @@ export default async function KeysPage() {
         <div className="panel">
           <div className="panel-head">
             <span className="panel-title">上游金鑰</span>
-            <span className="microlabel">{providerKeys.length} 把 · 依計價型態排序</span>
+            <span className="microlabel">
+              {providerKeys.length} 把 · 依計價型態排序 ·{" "}
+              {upstreamModels.fetchedAt
+                ? `模型清單抓取於 ${formatTaipei(upstreamModels.fetchedAt, true)}`
+                : "模型清單尚未抓取"}
+            </span>
           </div>
           {providerKeys.length === 0 ? (
             <div className="empty-state">
