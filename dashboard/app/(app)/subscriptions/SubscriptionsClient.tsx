@@ -141,6 +141,7 @@ export default function SubscriptionsClient({
    * 排程只在扣款日凍結固定月費，升級當下補的差額沒有地方記，帳面會少一筆真的付出去的錢。
    * 注意這跟「改月費」是兩件事：改月費影響的是**以後**每個月，補差額是**這一次**。
    */
+  const [delId, setDelId] = useState<number | null>(null);
   const [addingCharge, setAddingCharge] = useState(false);
   const [mcSubId, setMcSubId] = useState("");
   const [mcDate, setMcDate] = useState("");
@@ -237,6 +238,33 @@ export default function SubscriptionsClient({
       router.refresh();
     } catch (err) {
       setMcError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * 刪掉一筆人工補的扣款（2026-09-21）。
+   *
+   * 只有 `手動` 那幾列會出現這顆按鈕。排程凍結的不能刪——那是已經發生的事，
+   * 要調整金額請填「實際入帳」做對帳。
+   * 不做就地編輯是刻意的：財務紀錄改錯了沒有痕跡，刪掉重補至少看得出發生過什麼。
+   */
+  async function deleteCharge(id: number) {
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/subscription-charges/${id}`, { method: "DELETE" });
+      const d = await res.json();
+      if (!res.ok) {
+        setError(d.error ?? `刪除失敗（${res.status}）`);
+        return;
+      }
+      setCharges((prev) => prev.filter((c) => c.id !== id));
+      setDelId(null);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -805,6 +833,7 @@ export default function SubscriptionsClient({
                     <th>凍結匯率</th>
                     <th>台幣金額 · 預期</th>
                     <th>實際入帳</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -908,6 +937,40 @@ export default function SubscriptionsClient({
                             </button>
                           )}
                         </td>
+                        <td className="t-act">
+                          {/* 只有人工補的能刪。排程凍結的是「已經發生的事」，
+                              刪掉等於竄改帳——要調整金額請用左邊的「實際入帳」做對帳。 */}
+                          {c.source === "manual" ? (
+                            delId === c.id ? (
+                              <>
+                                <button
+                                  className="btn-ghost"
+                                  type="button"
+                                  onClick={() => setDelId(null)}
+                                  disabled={busy}
+                                >
+                                  取消
+                                </button>{" "}
+                                <button
+                                  className="btn-danger"
+                                  type="button"
+                                  onClick={() => deleteCharge(c.id)}
+                                  disabled={busy}
+                                >
+                                  確定刪除
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                className="btn-ghost"
+                                type="button"
+                                onClick={() => setDelId(c.id)}
+                              >
+                                刪除
+                              </button>
+                            )
+                          ) : null}
+                        </td>
                       </tr>
                     );
                   })}
@@ -922,7 +985,9 @@ export default function SubscriptionsClient({
               "回頭看上個月的台幣金額會被這個月的匯率改寫，跟信用卡帳單永遠對不起來，" +
               "而且對不起來時分不清是匯率造成的還是漏記造成的。" +
               "「若全部用今日匯率重算」那一格只是拿來看差多少，不是帳面數字。" +
-              "手續費是國外交易手續費，預設 1.5%，實際依發卡行調整，在本頁最下方可改。"}
+              "手續費是國外交易手續費，預設 1.5%，實際依發卡行調整，在本頁最下方可改。" +
+              "標成「手動」的那幾筆是人工補的（例如升級補差額），可以刪掉重補；" +
+              "排程凍結的不能刪，填錯請用「實際入帳」做對帳。"}
           </div>
         </div>
       </section>

@@ -1282,6 +1282,29 @@ export async function addManualCharge(params: {
   return result.rows[0];
 }
 
+/**
+ * 刪掉一筆**人工補的**扣款（2026-09-21）。
+ *
+ * 只能刪 source='manual'。排程凍結的那些是「已經發生的事」的紀錄，
+ * 刪掉等於竄改帳——要調整實際金額請用「實際入帳」那一欄做對帳，那才是設計給人改的地方。
+ *
+ * 刻意不做「就地編輯」：這是一筆財務紀錄，改錯了沒有痕跡。
+ * 填錯就刪掉重補一筆，時間序上看得出來發生過什麼。
+ */
+export async function deleteManualCharge(id: number): Promise<SubscriptionChargeRow | null> {
+  const client = getPool();
+  const result = await client.query<SubscriptionChargeRow>(
+    `DELETE FROM costscale.subscription_charges
+      WHERE id = $1 AND source = 'manual'
+      RETURNING id, sub_id, to_char(charged_on, 'YYYY-MM-DD') AS charged_on,
+                fee, currency, fx_rate, fx_source, markup_pct, amount_twd,
+                source, note, actual_twd, reconciled_at,
+                (SELECT service FROM costscale.subscriptions WHERE id = sub_id) AS service`,
+    [id]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function listSubscriptionCharges(limit = 60): Promise<SubscriptionChargeRow[]> {
   try {
     const client = getPool();
@@ -2217,11 +2240,19 @@ export const VERTEX_PASSTHROUGH_PATTERN = "vertex_ai/*";
 
 /** 一把虛擬金鑰目前的模型設定。直接讀 LiteLLM 自己的資料表，那是唯一的真相。 */
 export type KeyModelSetting = {
+  /** 允許使用的模型（含訂閱通道與別名本身）。 */
   models: string[];
+  /** 這把金鑰專屬的模型對應，例如 { default: "gemini-smart" }。 */
   aliases: Record<string, string>;
 };
 
-/** 一次讀多把金鑰的模型設定（2026-09-21）。查不到就回空的，不要讓整頁掛掉。 */
+/**
+ * 一次讀多把金鑰的模型設定（2026-09-21）。
+ *
+ * 為什麼不逐把打 /key/info：軟體一多就是 N 次往返，而這些資料本來就在
+ * 同一個資料庫裡，一次查完即可。查不到就回空的，讓畫面顯示「讀不到」，
+ * 不要讓整頁掛掉。
+ */
 export async function getKeyModelSettings(
   vkeyIds: string[]
 ): Promise<Record<string, KeyModelSetting>> {
@@ -2406,7 +2437,7 @@ export type Reminder = {
 /**
  * 到期前一週的提醒，兩種來源：
  *
- * 1. 軟體的訂閱設定複查日（`apps.review_at`）——像某個試穿專案這種
+ * 1. 軟體的訂閱設定複查日（`apps.review_at`）——像換衣間這種
  *    「現在自用、開賣後必須關掉訂閱」的情況，靠人記得不可靠。
  * 2. 年繳訂閱的扣款日——那是唯一一次「不續就要現在決定」的時機，
  *    錯過就再綁一年。月繳不提醒，每月都扣，提醒會變成雜訊。
@@ -3142,13 +3173,17 @@ export function combineAllSourceTokens(
   gatewayTokens: number,
   cli: CliUsageSummary
 ): AllSourceTokens {
-  // **每一列只取自己的來源。** cli_session_usage 同時存 Claude Code（claude-code-local）
-  // 與 Codex（codex-cli）；拿整張表的合計當 Codex，會把 Claude Code 的量算進 Codex。
-  // Claude Code 也不讀 OTel 遙測——遙測只收得到約四成，與其他面板不一致。
+  // **每一列只取自己的來源**（2026-09-18 User：「codex、claude 的 token 是不是寫錯了」）。
+  // 原本兩個錯，實測本月：
+  //   1. Codex 取的是 cli.totalTokens——整張 cli_session_usage 的合計。但 9/7 起 Claude Code
+  //      本機收集器也寫進這張表（source = claude-code-local），於是「Codex」顯示 276.61 億，
+  //      其中 270.78 億其實是 Claude Code，真正的 Codex 只有 5.83 億。
+  //   2. Claude Code 還在讀 OTel 遙測（50.87 億）。9/7 已量到遙測只收得到約四成，
+  //      其他面板都換成本機收集器，只有這格漏改。
   //
-  // 兩個來源的 total_tokens 都已經是「含快取的全部量」，不要再加：
-  //   claude-code-local：total = input＋output＋cache_read＋cache_write
-  //   codex-cli：        total = input＋output，而 input 本身含 cached
+  // 兩個來源的 total_tokens 都已經是「含快取的全部量」，不要再加（2026-09-18 資料庫逐筆驗證）：
+  //   claude-code-local：total = input＋output＋cache_read＋cache_write（636／636 筆）
+  //   codex-cli：        total = input＋output，而 input 本身含 cached（414／414 筆）
   const src = (name: string) => cli.bySource.find((s) => s.source === name);
   const claude = src("claude-code-local");
   const codex = src("codex-cli");
