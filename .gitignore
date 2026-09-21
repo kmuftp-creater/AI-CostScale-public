@@ -31,10 +31,12 @@ doc/*.zip
 doc/*.7z
 
 # 公開版：伺服器上的金鑰、佇列、備份、服務帳戶檔，絕不進版控
-keys/
-spool/
-backups/
-secrets/
+# 只擋專案根目錄那幾個（開頭的 / 不能省：沒有它，`keys/` 會連
+# dashboard/app/(app)/keys/ 整個金鑰管理頁面一起擋掉，2026-09-21 發現）
+/keys/
+/spool/
+/backups/
+/secrets/
 *.key
 *-sa.json
 service-account*.json

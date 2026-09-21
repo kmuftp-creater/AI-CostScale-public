@@ -2156,3 +2156,29 @@ td.t-act button {
   justify-content: space-between;
   margin: 0.75rem 0;
 }
+
+/* 金鑰管理：每把金鑰底下的「可用模型」（2026-09-21） */
+.ledger tr.k-models > td { padding-top: 0; border-top: 0; }
+.ledger tr.k-models details > summary {
+  cursor: pointer; font-size: 0.82rem; color: var(--muted); list-style: none;
+}
+.ledger tr.k-models details > summary::-webkit-details-marker { display: none; }
+.ledger tr.k-models details > summary::before { content: "▸ "; }
+.ledger tr.k-models details[open] > summary::before { content: "▾ "; }
+.ledger tr.k-models details > summary:hover { color: var(--ink); }
+.ledger tr.k-models .k-note {
+  margin: 6px 0 10px; font-size: 0.8rem; line-height: 1.7; color: var(--muted);
+  word-break: break-all;
+}
+.ledger tr.k-models .k-gone { color: var(--crit); }
+
+/* 應用程式頁：模型設定對話框（2026-09-21） */
+.model-pick {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 4px 14px; margin: 10px 0 6px; max-height: 260px; overflow-y: auto;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+}
+.model-opt { display: flex; align-items: center; gap: 7px; font-size: 0.84rem; cursor: pointer; }
+.model-opt code { font-size: 0.8rem; }
+.model-default { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; font-size: 0.86rem; }
+.model-default select { padding: 5px 8px; min-width: 210px; }

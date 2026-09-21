@@ -6,7 +6,10 @@ import {
   listAppLimits,
   getFxRate,
   spendOfKeysSince,
+  getKeyModelSettings,
+  VERTEX_PASSTHROUGH_PATTERN,
 } from "@/lib/db";
+import { listGatewayModelNames, DEFAULT_ALIAS } from "@/lib/litellm";
 import { resolveRange } from "@/lib/range";
 import AppsClient from "./AppsClient";
 import AppSubsClient from "./AppSubsClient";
@@ -29,6 +32,25 @@ export default async function AppsPage({
     listAppLimits(),
     getFxRate(),
   ]);
+
+  // 每個軟體的模型設定（2026-09-21）。真相在閘道那把金鑰上，這裡只是讀出來顯示。
+  // 閘道連不上時 gatewayModels 會是空陣列，對話框就沒有東西可勾，而不是給一張錯的清單。
+  const [keySettings, gatewayModels] = await Promise.all([
+    getKeyModelSettings(apps.map((a) => a.vkey_id ?? "")),
+    listGatewayModelNames().catch(() => [] as string[]),
+  ]);
+  const modelSettings: Record<number, { allowed: string[]; defaultModel: string | null }> = {};
+  for (const a of apps) {
+    const s = a.vkey_id ? keySettings[a.vkey_id] : undefined;
+    if (!s) continue;
+    modelSettings[a.id] = {
+      // 訂閱通道、Vertex 直通樣式、別名本身都不是「可勾選的模型」
+      allowed: s.models.filter(
+        (m) => !m.startsWith("sub-") && m !== VERTEX_PASSTHROUGH_PATTERN && m !== DEFAULT_ALIAS
+      ),
+      defaultModel: s.aliases?.[DEFAULT_ALIAS] ?? null,
+    };
+  }
 
   // 每月硬上限（2026-09-10）。「本月已用」要跟閘道歸零的邊界一致：
   // 2026-09-12 起閘道設了 timezone: Asia/Taipei，月初是台北 1 日 00:00，
@@ -85,6 +107,8 @@ export default async function AppsPage({
         costByVkey={costByVkey}
         unattributed={JSON.parse(JSON.stringify(unattributed))}
         limits={limits}
+        modelSettings={modelSettings}
+        gatewayModels={gatewayModels}
         gatewayUrl={(process.env.GATEWAY_PUBLIC_URL ?? "https://llm.example.com").replace(/\/+$/, "")}
         fx={fx.rate}
         fxNote={`1 美元＝${fx.rate.toFixed(2)} 台幣（${fx.day ?? "手動設定"}${

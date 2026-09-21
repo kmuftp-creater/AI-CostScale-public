@@ -107,6 +107,8 @@ export default function AppsClient({
   costByVkey,
   unattributed,
   limits,
+  modelSettings,
+  gatewayModels,
   fx,
   fxNote,
   gatewayUrl,
@@ -115,6 +117,10 @@ export default function AppsClient({
   costByVkey: Record<string, CostEntry>;
   unattributed: Unattributed;
   limits: Record<number, AppLimitView>;
+  /** 每個軟體目前的模型設定（2026-09-21）。來源是閘道那把金鑰，不是另存一份。 */
+  modelSettings: Record<number, { allowed: string[]; defaultModel: string | null }>;
+  /** 閘道上可選的非訂閱模型。訂閱通道走「訂閱橋接」面板，不在這裡選。 */
+  gatewayModels: string[];
   /** 1 美元換多少台幣（含手續費）。畫面上所有台幣都用這個換。 */
   fx: number;
   fxNote: string;
@@ -136,6 +142,14 @@ export default function AppsClient({
   const [keyWarning, setKeyWarning] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   // 每月硬上限的對話框（2026-09-10）
+  // 模型設定（2026-09-21）
+  const [modelTarget, setModelTarget] = useState<AppRow | null>(null);
+  const [modelAllowed, setModelAllowed] = useState<string[]>([]);
+  const [modelDefault, setModelDefault] = useState<string>("");
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [modelNotice, setModelNotice] = useState<string | null>(null);
+
   const [limitTarget, setLimitTarget] = useState<AppRow | null>(null);
   const [limitCur, setLimitCur] = useState<"twd" | "usd">("twd");
   const [limitInput, setLimitInput] = useState("");
@@ -157,6 +171,46 @@ export default function AppsClient({
       setTimeout(() => setCopied(null), 2000);
     } catch {
       setCopied(`${what}:失敗`);
+    }
+  }
+
+  function openModels(app: AppRow) {
+    const cur = modelSettings[app.id];
+    setModelAllowed(cur?.allowed?.length ? cur.allowed : gatewayModels);
+    setModelDefault(cur?.defaultModel ?? "");
+    setModelError(null);
+    setModelNotice(null);
+    setModelTarget(app);
+  }
+
+  async function saveModels() {
+    if (!modelTarget) return;
+    setModelSaving(true);
+    setModelError(null);
+    try {
+      const all = modelAllowed.length === gatewayModels.length;
+      const res = await fetch(`/api/apps/${modelTarget.id}/models`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          allowed: all ? null : modelAllowed,
+          defaultModel: modelDefault || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      setModelNotice(
+        `已更新「${modelTarget.name}」：可用 ${data.allowed.length} 個模型` +
+          (data.defaultModel
+            ? `，預設模型 ${data.defaultModel}（專案送 ${data.aliasName} 就會打到它）`
+            : "，沒有設預設模型")
+      );
+      setModelTarget(null);
+      router.refresh();
+    } catch (err) {
+      setModelError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setModelSaving(false);
     }
   }
 
@@ -380,6 +434,9 @@ export default function AppsClient({
                       <td className="t-act">
                         {app.status === "active" ? (
                           <>
+                            <button className="btn-ghost" type="button" onClick={() => openModels(app)}>
+                              模型
+                            </button>
                             <button className="btn-ghost" type="button" onClick={() => openLimit(app)}>
                               每月上限
                             </button>
@@ -585,6 +642,76 @@ export default function AppsClient({
           <button className="btn-ghost" type="button" onClick={() => setLimitNotice(null)}>
             知道了
           </button>
+        </div>
+      ) : null}
+
+      {modelNotice ? (
+        <div className="form-ok limit-notice" role="status">
+          {modelNotice}
+          <button className="btn-ghost" type="button" onClick={() => setModelNotice(null)}>
+            知道了
+          </button>
+        </div>
+      ) : null}
+
+      {modelTarget ? (
+        <div className="dialog-overlay" role="dialog" aria-modal="true">
+          <div className="dialog-card">
+            <div className="dialog-title">「{modelTarget.name}」可以用哪些模型</div>
+            <div className="ledger-note">
+              <strong>模型是專案每次呼叫時指定的</strong>，這裡決定的是它「可以」用哪些。
+              取消勾選的模型，那個專案打過去會收到 HTTP 403。
+              訂閱通道（<code>sub-</code> 開頭）不在這裡設定，那要走下面的「訂閱橋接」面板。
+            </div>
+            <div className="model-pick">
+              {gatewayModels.map((m) => (
+                <label key={m} className="model-opt">
+                  <input
+                    type="checkbox"
+                    checked={modelAllowed.includes(m)}
+                    onChange={(e) =>
+                      setModelAllowed((prev) =>
+                        e.target.checked ? [...prev, m] : prev.filter((x) => x !== m)
+                      )
+                    }
+                  />
+                  <code>{m}</code>
+                </label>
+              ))}
+            </div>
+            <div className="limit-cur" role="group" aria-label="快速選取">
+              <button type="button" className="btn-ghost" onClick={() => setModelAllowed(gatewayModels)}>
+                全部勾選
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => setModelAllowed([])}>
+                全部取消
+              </button>
+            </div>
+            <label className="model-default">
+              預設模型（選填）
+              <select value={modelDefault} onChange={(e) => setModelDefault(e.target.value)}>
+                <option value="">不指定</option>
+                {modelAllowed.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="ledger-note">
+              設了預設模型之後，那個專案只要送 <code>default</code> 這個名字就會打到它。
+              好處是<strong>以後要換模型，改這裡就好，專案一行都不用動</strong>。
+            </div>
+            {modelError ? <div className="dialog-warn">{modelError}</div> : null}
+            <div className="dialog-actions">
+              <button type="button" className="btn-ghost" onClick={() => setModelTarget(null)} disabled={modelSaving}>
+                取消
+              </button>
+              <button type="button" className="btn-primary" onClick={saveModels} disabled={modelSaving}>
+                {modelSaving ? "儲存中…" : "儲存"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 

@@ -177,6 +177,35 @@ export async function setKeyAllowedModels(params: {
 }
 
 /**
+ * 「預設模型」用的別名。**固定叫這個名字**，專案設定一次就不必再改；
+ * 要換模型是改這把金鑰的 aliases 指向，不是叫專案改字串。
+ */
+export const DEFAULT_ALIAS = "default";
+
+/**
+ * 設定一把虛擬金鑰的「可用模型」與「預設模型」（2026-09-21）。
+ *
+ * 1. `models` 是允許清單，縮小它就能限制某個軟體只能用便宜的模型。
+ * 2. `aliases` 是這把金鑰專屬的模型對應。設了 `{ default: "gemini-smart" }` 之後，
+ *    那個專案送 `default` 就會打到 gemini-smart，專案程式一行都不用改。
+ *
+ * **別名本身一定要同時列進 `models`。** LiteLLM 的權限檢查跑在別名解析之前，
+ * 只設 aliases 而沒把別名放進白名單，呼叫端會拿到 403，而錯誤訊息列出的清單裡
+ * 根本沒有那個別名，很難看出原因。
+ */
+export async function setKeyModelsAndAliases(params: {
+  key: string;
+  models: string[];
+  aliases: Record<string, string>;
+}): Promise<void> {
+  await callLiteLlm("/key/update", {
+    key: params.key,
+    models: params.models,
+    aliases: params.aliases,
+  });
+}
+
+/**
  * 設定或解除一把虛擬金鑰的每月硬上限（2026-09-10）。
  *
  * 超過 `max_budget` 時閘道**直接拒絕、不轉發給供應商**——執行的是 LiteLLM，

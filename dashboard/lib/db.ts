@@ -2158,6 +2158,39 @@ export const NON_SUB_MODEL_PATTERNS = [
  */
 export const VERTEX_PASSTHROUGH_PATTERN = "vertex_ai/*";
 
+/** 一把虛擬金鑰目前的模型設定。直接讀 LiteLLM 自己的資料表，那是唯一的真相。 */
+export type KeyModelSetting = {
+  models: string[];
+  aliases: Record<string, string>;
+};
+
+/** 一次讀多把金鑰的模型設定（2026-09-21）。查不到就回空的，不要讓整頁掛掉。 */
+export async function getKeyModelSettings(
+  vkeyIds: string[]
+): Promise<Record<string, KeyModelSetting>> {
+  const ids = vkeyIds.filter(Boolean);
+  if (ids.length === 0) return {};
+  try {
+    const client = getPool();
+    const { rows } = await client.query<{ token: string; models: string[] | null; aliases: unknown }>(
+      `SELECT token, models, aliases FROM "LiteLLM_VerificationToken" WHERE token = ANY($1)`,
+      [ids]
+    );
+    const out: Record<string, KeyModelSetting> = {};
+    for (const r of rows) {
+      const aliases =
+        r.aliases && typeof r.aliases === "object" && !Array.isArray(r.aliases)
+          ? (r.aliases as Record<string, string>)
+          : {};
+      out[r.token] = { models: r.models ?? [], aliases };
+    }
+    return out;
+  } catch (err) {
+    console.warn("[db] getKeyModelSettings failed:", err instanceof Error ? err.message : err);
+    return {};
+  }
+}
+
 export type AppSubRow = {
   id: number;
   name: string;
