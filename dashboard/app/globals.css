@@ -2210,3 +2210,17 @@ td.t-act button {
   letter-spacing: 0.06em; color: var(--ink-2); border-bottom: 1px solid var(--line);
 }
 .model-opt .m-hint { font-size: 0.7rem; color: var(--muted); }
+
+/* 金鑰頁：每把憑證底下的「閘道在用的部署」小表（2026-09-21） */
+.ledger tr.k-models table.m-deploys { margin: 8px 0 10px; width: 100%; }
+.ledger tr.k-models table.m-deploys th {
+  font-size: 0.72rem; letter-spacing: 0.06em; color: var(--muted);
+  font-weight: 400; padding-bottom: 4px;
+}
+.ledger tr.k-models table.m-deploys td { padding: 4px 8px 4px 0; font-size: 0.8rem; }
+.ledger tr.k-models table.m-deploys code { font-size: 0.78rem; }
+.ledger tr.k-models table.m-deploys .t-act { text-align: right; width: 1%; white-space: nowrap; }
+.ledger tr.k-models details.m-catalog > summary {
+  cursor: pointer; font-size: 0.78rem; color: var(--muted); margin: 6px 0;
+}
+.ledger tr.k-models details.m-catalog > summary:hover { color: var(--ink); }

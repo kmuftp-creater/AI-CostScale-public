@@ -5,6 +5,7 @@ import QuotaPoolsClient from "./QuotaPoolsClient";
 import AddUpstreamKeyClient from "./AddUpstreamKeyClient";
 import RemoveUpstreamKeyClient from "./RemoveUpstreamKeyClient";
 import RetargetModelClient, { type Candidate } from "./RetargetModelClient";
+import PriceModelClient from "./PriceModelClient";
 import { formatTokens, formatTaipei, sinceNow } from "@/lib/format";
 import { Fragment } from "react";
 import {
@@ -135,6 +136,9 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
     return out;
   };
   const groups = groupModels(data, cat, cat?.models ?? []);
+  // 自訂單價寫在設定檔的 model_info，checkDeployments 只認得後端模型名，
+  // 所以另外用部署名做一張對照表。
+  const price = new Map(row.deployments.map((d) => [d.modelName, d]));
   const used = new Set(checks.map((c) => catalogId(c.backendModel)));
   const unused = unusedModels(cat, row.deployments);
   const todo = gone.length + expiring.length;
@@ -190,21 +194,105 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
                 </div>
               ) : null}
 
-              {groups.map((g) => (
-                <p key={g.group} className="k-note m-group">
-                  <span className="m-head">
-                    {g.group} {g.items.length}
-                  </span>
-                  {g.items.slice(0, 24).map((m) => (
-                    <ModelPill key={m.id} m={m} used={used.has(m.id)} />
-                  ))}
-                  {g.items.length > 24 ? <span className="m-more">等 {g.items.length} 個</span> : null}
-                </p>
-              ))}
+              {/* 這張表是 User 2026-09-21 要的：「我指的是現在 GOOGLE_APPLICATION_CREDENTIALS
+                  是使用哪個模型…也沒有看到可以更換的地方」。
+                  在這之前只有「快到期」那幾筆能換，其餘的連現在打到哪都要自己從下面的粗體去猜。
+                  現在每一個部署都列出來，而且每一列都能換——換模型不該是只有出事時才做的事。 */}
+              <table className="ledger m-deploys">
+                <thead>
+                  <tr>
+                    <th>專案送這個名字</th>
+                    <th>實際打到</th>
+                    <th>狀態</th>
+                    <th>單價 · 每百萬</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {checks.map((c) => {
+                    const soon = c.meta ? isExpiringSoon(c.meta.expires) : false;
+                    const stage = c.meta ? STAGE_LABEL[c.meta.stage] : undefined;
+                    return (
+                      <tr key={c.backendModel}>
+                        <td className="t-name">
+                          <code>{c.modelName}</code>
+                        </td>
+                        <td>
+                          <code className={c.present === false ? "k-gone" : undefined}>
+                            {c.backendModel}
+                          </code>
+                        </td>
+                        <td className="microlabel">
+                          {c.present === false ? (
+                            <span className="k-gone">供應商已無</span>
+                          ) : c.present === null ? (
+                            "萬用，不判斷"
+                          ) : (
+                            <>
+                              {stage ? `${stage} · ` : ""}
+                              {c.meta?.expires ? (
+                                <span className={soon ? "k-gone" : undefined}>
+                                  {expiryText(c.meta)}
+                                </span>
+                              ) : (
+                                "正常"
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <td className="microlabel">
+                          {/* 沒有自訂單價時不寫「內建」兩個字就好——那是正常情況，
+                              不需要每一列都佔一行字。有自訂的才要看得出來。 */}
+                          {price.get(c.modelName)?.inputPerMTok != null ? (
+                            <>
+                              自訂 {price.get(c.modelName)?.inputPerMTok}／
+                              {price.get(c.modelName)?.outputPerMTok}
+                            </>
+                          ) : (
+                            <span style={{ color: "var(--muted)" }}>內建價目</span>
+                          )}
+                        </td>
+                        <td className="t-act">
+                          {c.present === null ? null : (
+                            <>
+                              <RetargetModelClient
+                                modelName={c.modelName}
+                                currentBackend={c.backendModel}
+                                candidates={candidatesFor(c)}
+                              />{" "}
+                              <PriceModelClient
+                                modelName={c.modelName}
+                                inputPerMTok={price.get(c.modelName)?.inputPerMTok ?? null}
+                                outputPerMTok={price.get(c.modelName)?.outputPerMTok ?? null}
+                              />
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              <details className="m-catalog">
+                <summary>這把金鑰還能用哪些模型（{cat?.count ?? 0} 個，其中 {unused.length} 個閘道沒開）</summary>
+                {groups.map((g) => (
+                  <p key={g.group} className="k-note m-group">
+                    <span className="m-head">
+                      {g.group} {g.items.length}
+                    </span>
+                    {g.items.slice(0, 24).map((m) => (
+                      <ModelPill key={m.id} m={m} used={used.has(m.id)} />
+                    ))}
+                    {g.items.length > 24 ? <span className="m-more">等 {g.items.length} 個</span> : null}
+                  </p>
+                ))}
+              </details>
 
               <p className="k-note m-foot">
-                粗體＝閘道正在用的（{checks.length} 個）。這把金鑰還能用、但閘道還沒開的有 {unused.length} 個。
-                「停用」日期只有 OpenRouter 會直說，其他家是拿同名模型交叉參考來的，不是原廠公告。
+                上面那張表是**閘道實際在用的**，每一列都可以換。
+                「停用」日期只有 OpenRouter 會直說，其他家是拿同名模型交叉參考來的，不是原廠公告；
+                沒有日期不代表安全，只代表沒人講。
               </p>
             </>
           )}
@@ -408,6 +496,22 @@ export default async function KeysPage() {
             <span className="microlabel">加進既有模型組當輪替的一把</span>
           </div>
           <AddUpstreamKeyClient
+            /* 開新模型組時要挑模型，所以把各供應商的型錄一起送過去（2026-09-21）。
+               只送 id 與幾個標籤，不送整份 meta——前端只需要「挑得出來、看得出風險」。 */
+            catalogs={Object.fromEntries(
+              ["gemini", "groq", "openrouter", "openai", "anthropic"].map((prov) => [
+                prov,
+                (upstreamModels.providers[prov]?.models ?? []).slice(0, 500).map((id) => {
+                  const m = upstreamModels.providers[prov]?.meta?.[id];
+                  return {
+                    id,
+                    group: m?.group ?? "其他",
+                    stage: m?.stage ?? "",
+                    expires: m?.expires ?? "",
+                  };
+                }),
+              ])
+            )}
             options={(() => {
               // 每個模型組帶著「目前掛在它底下的環境變數名」一起送給前端，
               // 前端才算得出下一個該叫什麼（2026-09-07：原本要使用者自己想，

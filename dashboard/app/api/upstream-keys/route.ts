@@ -142,6 +142,72 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "請求 body 不是合法 JSON" }, { status: 400 });
   }
 
+  // ── 自訂單價：走同一條 spool（2026-09-21）──────────────────────
+  // User：「C6 沒看到可以填價格的地方」。
+  // LiteLLM 內建價目涵蓋多數公開模型，但自架模型與剛出的型號沒有——
+  // 那時花費會記成 0。對一個賣點是「看得到花多少錢」的東西，
+  // 記 0 比記錯更糟，因為它看起來很正常。
+  //
+  // 介面收的是「每百萬 token 的美元」（人看得懂的那個數字），
+  // 換算成 LiteLLM 的每 token 在主機端做。
+  if (str(body.op, 20) === "price") {
+    const modelName = str(body.modelName, 80);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$/.test(modelName) || modelName.includes("*")) {
+      return NextResponse.json({ error: `部署名不合法：${modelName}` }, { status: 400 });
+    }
+    const clear = body.inputPerMTok == null || body.inputPerMTok === "";
+    let inputPerMTok: number | null = null;
+    let outputPerMTok: number | null = null;
+    if (!clear) {
+      inputPerMTok = Number(body.inputPerMTok);
+      outputPerMTok = Number(body.outputPerMTok);
+      if (!Number.isFinite(inputPerMTok) || inputPerMTok < 0) {
+        return NextResponse.json({ error: "輸入單價要是 0 或正數" }, { status: 400 });
+      }
+      if (!Number.isFinite(outputPerMTok) || outputPerMTok < 0) {
+        return NextResponse.json({ error: "輸出單價要是 0 或正數" }, { status: 400 });
+      }
+      // 一個離譜值的擋：每百萬 1000 美元是現行最貴模型的百倍以上，
+      // 多半是把「每 token」當成「每百萬」貼進來了。
+      if (inputPerMTok > 1000 || outputPerMTok > 1000) {
+        return NextResponse.json(
+          { error: "單價看起來太大。這裡要填的是「每百萬 token 多少美元」，不是每個 token。" },
+          { status: 400 }
+        );
+      }
+    }
+    const id = randomUUID();
+    try {
+      await mkdir(SPOOL, { recursive: true });
+      const tmp = path.join(SPOOL, `${id}.json.tmp`);
+      await writeFile(
+        tmp,
+        JSON.stringify({
+          id,
+          op: "price",
+          modelName,
+          inputPerMTok: clear ? null : inputPerMTok,
+          outputPerMTok: clear ? null : outputPerMTok,
+          createdAt: new Date().toISOString(),
+        }),
+        { encoding: "utf8", mode: 0o600 }
+      );
+      await rename(tmp, path.join(SPOOL, `${id}.json`));
+    } catch (e) {
+      return NextResponse.json(
+        { error: `寫入待套用佇列失敗：${e instanceof Error ? e.message : String(e)}` },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      id,
+      message: clear
+        ? `已排入佇列：清除 ${modelName} 的自訂單價，改用 LiteLLM 內建價目。套用時閘道會重啟數秒。`
+        : `已排入佇列：把 ${modelName} 的單價設為每百萬 token 輸入 ${inputPerMTok}、輸出 ${outputPerMTok} 美元。套用時閘道會重啟數秒。`,
+    });
+  }
+
   // ── 換部署後端：走同一條 spool（2026-09-21）────────────────────
   // User：「裡面的模型要到期了，但我沒有看到可以更換的地方」。
   // 在這之前，要把某個部署改成打另一支模型只能 ssh 進去改 litellm-config.yaml。
@@ -233,6 +299,16 @@ export async function POST(request: NextRequest) {
   if (!modelName || !backendModel) {
     return NextResponse.json({ error: "要指定加進哪個模型組、以及上游模型名" }, { status: 400 });
   }
+  // 開新的模型組（2026-09-21，User：「既然可以選擇模型了，那新增時也要可以選擇模型吧」）。
+  // 部署名是專案要送出去的字串，所以只收乾淨的字元；含 * 的萬用名不能從這裡建，
+  // 那是設定檔層級的決定，不該由一顆按鈕產生。
+  const newGroup = body.newGroup === true;
+  if (newGroup && (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$/.test(modelName) || modelName.includes("*"))) {
+    return NextResponse.json(
+      { error: "新模型組的名字只能用英數與 . _ -，開頭是英數，而且不能含萬用字元" },
+      { status: 400 }
+    );
+  }
   if (!/^[A-Z][A-Z0-9_]{2,60}$/.test(envVar)) {
     return NextResponse.json(
       { error: "環境變數名只能用大寫英數與底線，開頭是字母，長度 3 到 61" },
@@ -263,6 +339,7 @@ export async function POST(request: NextRequest) {
     modelName,
     envVar,
     backendModel,
+    newGroup,
     key,
     rpm: rpm > 0 ? rpm : undefined,
     pricingType,
@@ -287,6 +364,9 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     id,
-    message: `金鑰已驗證通過（${v.detail}），已排入套用佇列。主機端每分鐘處理一次，套用時閘道會重啟數秒。`,
+    message:
+      `金鑰已驗證通過（${v.detail}），已排入套用佇列。` +
+      (newGroup ? `會開一個新的模型組 ${modelName}（打 ${backendModel}）。` : "") +
+      "主機端每分鐘處理一次，套用時閘道會重啟數秒。",
   });
 }

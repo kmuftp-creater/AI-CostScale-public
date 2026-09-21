@@ -444,6 +444,165 @@ def gateway_backend_of(model_name):
     return None
 
 
+def find_model_list_end(lines):
+    """`model_list:` 這個區段在第幾行結束（不含）。找不到回 None。
+
+    規則：從 `model_list:` 往下走，遇到**頂層的鍵**（行首非空白、非註解、含冒號）就停。
+    最後把結尾的空行與緊鄰的註解留給下一段——那些註解通常是下一段的標題，
+    不是前一筆部署的尾巴（移除功能也踩過同一個邊界問題）。
+    """
+    start = None
+    for i, ln in enumerate(lines):
+        if re.match(r"^model_list:\s*$", ln.rstrip()):
+            start = i
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        ln = lines[j]
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*:", ln):
+            end = j
+            break
+    while end - 1 > start and (lines[end - 1].strip() == "" or re.match(r"^ {0,3}#", lines[end - 1])):
+        end -= 1
+    return end
+
+
+def build_new_group(req):
+    """全新的模型組。與 build_entry 的差別只有多一行說明，讓人知道這是誰加的。"""
+    out = ["\n",
+           "  # %s 由儀表板新增的模型組\n" % stamp()]
+    out += build_entry(req)
+    return out
+
+
+def set_price_lines(lines, spans, in_cost, out_cost):
+    """把每一筆條目的 model_info 補上（或移除）自訂單價。
+
+    為什麼是每百萬換算成每 token：LiteLLM 的欄位是 input_cost_per_token，
+    但人看到的價目表都是「每百萬」。換算放在最靠近使用者的那一層做過一次就好，
+    存進設定檔的是 LiteLLM 認得的形式。
+    """
+    out = list(lines)
+    for start, end in sorted(spans, reverse=True):
+        block = out[start:end]
+        # 先把舊的兩行拿掉，再決定要不要寫新的
+        block = [b for b in block
+                 if not re.match(r"^\s+(input|output)_cost_per_token:\s", b)]
+        if in_cost is None:
+            out[start:end] = block
+            continue
+        has_info = any(re.match(r"^\s+model_info:\s*$", b) for b in block)
+        if has_info:
+            for k, b in enumerate(block):
+                if re.match(r"^\s+model_info:\s*$", b):
+                    block.insert(k + 1, "      input_cost_per_token: %s\n" % in_cost)
+                    block.insert(k + 2, "      output_cost_per_token: %s\n" % out_cost)
+                    break
+        else:
+            block.append("    model_info:\n")
+            block.append("      input_cost_per_token: %s\n" % in_cost)
+            block.append("      output_cost_per_token: %s\n" % out_cost)
+        out[start:end] = block
+    return out
+
+
+def process_price(req_id, req):
+    """替某個部署填自訂單價（2026-09-21）。
+
+    起因（User）：「C6 沒看到可以填價格的地方」。
+    LiteLLM 內建的價目表涵蓋大多數公開模型，但**自架模型與剛出的型號沒有**，
+    那時花費會記成 0——對一個以「看得到花多少錢」為賣點的東西，記 0 比記錯更糟，
+    因為它看起來很正常。
+
+    單價傳進來是「每百萬 token 的美元」，寫進設定檔時換算成 LiteLLM 的每 token。
+    傳 null 代表清掉自訂單價，回去用 LiteLLM 內建的。
+    """
+    model_name = (req.get("modelName") or "").strip()
+    if not model_name or "*" in model_name:
+        write_status(req_id, "failed", "部署名不合法：%s" % model_name)
+        return
+
+    def parse(v):
+        if v is None or v == "":
+            return None
+        f = float(v)
+        if f < 0:
+            raise ValueError("單價不能是負數")
+        return f
+
+    try:
+        in_m = parse(req.get("inputPerMTok"))
+        out_m = parse(req.get("outputPerMTok"))
+    except Exception as e:
+        write_status(req_id, "failed", "單價不合法：%s" % e, {"modelName": model_name})
+        return
+    if (in_m is None) != (out_m is None):
+        write_status(req_id, "failed",
+                     "輸入與輸出單價要嘛都填、要嘛都不填。只填一邊會讓另一邊悄悄用內建價目，"
+                     "兩者混用算出來的數字沒有意義。", {"modelName": model_name})
+        return
+
+    with open(CFG_PATH, encoding="utf-8") as f:
+        lines = f.readlines()
+    spans = find_entries_by_group(lines, model_name)
+    if not spans:
+        write_status(req_id, "failed", "設定檔裡沒有叫 %s 的部署。" % model_name,
+                     {"modelName": model_name})
+        return
+
+    in_cost = None if in_m is None else repr(in_m / 1_000_000)
+    out_cost = None if out_m is None else repr(out_m / 1_000_000)
+
+    cfg_bak = backup(CFG_PATH)
+    log("[%s] 設單價 %s：每百萬 %s／%s（%d 處）備份：%s"
+        % (req_id, model_name, in_m, out_m, len(spans), os.path.basename(cfg_bak)))
+
+    try:
+        new_lines = set_price_lines(lines, spans, in_cost, out_cost)
+        with open(CFG_PATH, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+
+        try:
+            import yaml  # noqa
+            with open(CFG_PATH, encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+            hit = [m for m in (doc.get("model_list") or []) if m.get("model_name") == model_name]
+            if len(hit) != len(spans):
+                raise ValueError("改完之後 %s 的條目數不對（%d ≠ %d）" % (model_name, len(hit), len(spans)))
+            for m in hit:
+                got = (m.get("model_info") or {}).get("input_cost_per_token")
+                if in_cost is None and got is not None:
+                    raise ValueError("清除失敗，還留著 input_cost_per_token")
+                if in_cost is not None and got is None:
+                    raise ValueError("寫入失敗，沒有 input_cost_per_token")
+        except ImportError:
+            log("[%s] 沒有 pyyaml，略過語法預檢" % req_id)
+
+        log("[%s] 重啟閘道…" % req_id)
+        restart_gateway()
+        if not gateway_ok():
+            raise RuntimeError("閘道重啟後 90 秒內沒有回到健康狀態")
+
+        msg = ("已清除 %s 的自訂單價，改用 LiteLLM 內建價目。" % model_name if in_cost is None
+               else "已把 %s 的單價設為每百萬 token 輸入 %s、輸出 %s 美元（共 %d 處）。"
+                    % (model_name, in_m, out_m, len(spans)))
+        write_status(req_id, "applied", msg + "閘道已重啟。", {"modelName": model_name})
+        log("[%s] 設單價成功：%s" % (req_id, model_name))
+
+    except Exception as e:
+        log("[%s] 設單價失敗，回滾：%s" % (req_id, e))
+        try:
+            shutil.copy2(cfg_bak, CFG_PATH)
+            restart_gateway()
+            ok = gateway_ok()
+            msg = "設單價失敗已回滾（閘道%s）：%s" % ("已恢復" if ok else "**仍不健康，要人工處理**", e)
+        except Exception as e2:
+            msg = "設單價失敗且回滾也失敗，要人工處理：%s ／ 回滾錯誤：%s" % (e, e2)
+        write_status(req_id, "failed", msg, {"modelName": model_name})
+
+
 def process_retarget(req_id, req):
     """把某個部署名改成打另一支後端模型（2026-09-21）。
 
@@ -658,6 +817,17 @@ def process(req_path):
         os.remove(req_path)
         return
 
+    # 設單價走另一條路：它不碰 .env，只改設定檔的 model_info。
+    if req.get("op") == "price":
+        try:
+            process_price(req_id, req)
+        finally:
+            try:
+                os.remove(req_path)
+            except Exception:
+                pass
+        return
+
     # 換模型走另一條路：它不碰 .env，只改設定檔裡的 model: 那一行。
     if req.get("op") == "retarget":
         try:
@@ -714,11 +884,30 @@ def process(req_path):
     with open(CFG_PATH, encoding="utf-8") as f:
         lines = f.readlines()
     end = find_last_entry_of_group(lines, req["modelName"])
+    new_group = False
     if end is None:
-        write_status(req_id, "failed",
-                     "設定檔裡找不到模型組 %s。這一版只能加進既有的模型組。" % req["modelName"])
-        os.remove(req_path)
-        return
+        # 開一個新的模型組（2026-09-21，User：「既然可以選擇模型了，那新增時也要可以選擇模型吧」）。
+        # 要明確帶 newGroup 才做——打錯既有模型組的名字而默默開一個新的，
+        # 結果是那把金鑰永遠不會被輪替到，而且畫面上看起來一切正常。
+        if not req.get("newGroup"):
+            write_status(req_id, "failed",
+                         "設定檔裡找不到模型組 %s。要開新的模型組請在介面上選「新的模型組」。"
+                         % req["modelName"])
+            os.remove(req_path)
+            return
+        known = catalog_has(req["backendModel"])
+        if known is False:
+            write_status(req_id, "failed",
+                         "供應商的模型清單裡沒有 %s。打錯字的話設定檔看起來完全正常，"
+                         "要等有人真的呼叫才會 404，所以這裡先擋下來。" % req["backendModel"])
+            os.remove(req_path)
+            return
+        end = find_model_list_end(lines)
+        if end is None:
+            write_status(req_id, "failed", "設定檔裡找不到 model_list: 區段，不敢亂插。")
+            os.remove(req_path)
+            return
+        new_group = True
 
     # ── 備份 ──────────────────────────────────────────────────────────
     env_bak = backup(ENV_PATH)
@@ -733,7 +922,8 @@ def process(req_path):
         os.chmod(ENV_PATH, 0o600)
 
         # config 插入
-        new_lines = lines[:end] + ["\n"] + build_entry(req) + lines[end:]
+        new_lines = (lines[:end] + (build_new_group(req) if new_group else ["\n"] + build_entry(req))
+                     + lines[end:])
         with open(CFG_PATH, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
 

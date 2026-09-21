@@ -59,6 +59,12 @@ export type KeyDeployment = {
   backendModel: string;
   /** 閘道上的部署 id。null＝yaml 有寫但閘道沒載入。 */
   deploymentId: string | null;
+  /**
+   * 設定檔裡自訂的單價（每百萬 token 美元）。null＝沒設，用 LiteLLM 內建價目。
+   * 自架模型與剛出的型號內建價目沒有，不設的話花費會記成 0。
+   */
+  inputPerMTok: number | null;
+  outputPerMTok: number | null;
 };
 
 export type DeploymentUsage = {
@@ -126,6 +132,9 @@ type ConfigEntry = {
   envName: string | null;
   pricing: PricingType;
   isWildcard: boolean;
+  /** 設定檔自訂的單價，每百萬 token 美元。null＝沒設，用 LiteLLM 內建價目。 */
+  inputPerMTok: number | null;
+  outputPerMTok: number | null;
 };
 
 function pricingOf(v: unknown): PricingType {
@@ -170,12 +179,19 @@ async function readConfig(): Promise<{ entries: ConfigEntry[]; error: string | n
         const backendModel = typeof params.model === "string" ? params.model : "";
         const apiKey = typeof params.api_key === "string" ? params.api_key : "";
         const envName = apiKey.startsWith("os.environ/") ? apiKey.slice("os.environ/".length) : null;
+        // LiteLLM 的欄位是「每 token」，人看的是「每百萬」，在這裡換算一次就好。
+        const perM = (v: unknown): number | null => {
+          const n = Number(v);
+          return Number.isFinite(n) && n > 0 ? n * 1_000_000 : null;
+        };
         entries.push({
           modelName,
           backendModel,
           envName,
           pricing: pricingOf(info.pricing_type),
           isWildcard: modelName.includes("*") || backendModel.includes("*"),
+          inputPerMTok: perM(info.input_cost_per_token ?? params.input_cost_per_token),
+          outputPerMTok: perM(info.output_cost_per_token ?? params.output_cost_per_token),
         });
       }
       return { entries, error: null };
@@ -373,11 +389,17 @@ export async function getKeyInventory(): Promise<KeyInventory> {
       { rows: [], pricing: e.pricing, provider, kind, ids: new Set<string>() };
     if (e.isWildcard) {
       const ids = wildcardIds.get(idx) ?? [];
-      cur.rows.push({ modelName: e.modelName, backendModel: e.backendModel, deploymentId: ids[0] ?? null });
+      cur.rows.push({
+        modelName: e.modelName, backendModel: e.backendModel, deploymentId: ids[0] ?? null,
+        inputPerMTok: e.inputPerMTok, outputPerMTok: e.outputPerMTok,
+      });
       ids.forEach((id) => cur.ids.add(id));
       if (ids.length === 0) unloaded += 1;
     } else {
-      cur.rows.push({ modelName: e.modelName, backendModel: e.backendModel, deploymentId: r.id });
+      cur.rows.push({
+        modelName: e.modelName, backendModel: e.backendModel, deploymentId: r.id,
+        inputPerMTok: e.inputPerMTok, outputPerMTok: e.outputPerMTok,
+      });
       if (r.id) cur.ids.add(r.id);
       else unloaded += 1;
     }
@@ -435,7 +457,12 @@ export async function getKeyInventory(): Promise<KeyInventory> {
     vertexIds.add(d.id);
     if (!configNames.has(d.modelName)) continue;
     if (vertexModels.length < 40) {
-      vertexModels.push({ modelName: d.modelName, backendModel: d.backendModel, deploymentId: d.id });
+      // 單價寫在設定檔，不在閘道的 /model/info，所以要回頭查一次。
+      const ce = entries.find((e) => e.modelName === d.modelName && !e.isWildcard);
+      vertexModels.push({
+        modelName: d.modelName, backendModel: d.backendModel, deploymentId: d.id,
+        inputPerMTok: ce?.inputPerMTok ?? null, outputPerMTok: ce?.outputPerMTok ?? null,
+      });
     }
   }
   if (vertexIds.size > 0) {

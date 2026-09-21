@@ -47,6 +47,25 @@ const PROVIDERS = [
   { id: "openrouter", label: "OpenRouter" },
 ];
 
+/** 供應商 → LiteLLM 的後端前綴。要跟主機端腳本的 PROVIDERS 對得起來。 */
+const PREFIX: Record<string, string> = {
+  gemini: "gemini/",
+  openai: "openai/",
+  anthropic: "anthropic/",
+  groq: "groq/",
+  openrouter: "openrouter/",
+};
+
+/** 下拉選單裡代表「開一個新的模型組」的值。用兩個底線包起來，避免撞到真的模型組名。 */
+const NEW_GROUP = "__new__";
+
+export type CatalogModel = {
+  id: string;
+  group: string;
+  stage: string;
+  expires: string;
+};
+
 /**
  * 從「這個模型組現在掛的變數名」推出下一個。
  * 例：GEMINI_FREE_KEY_1..5 → GEMINI_FREE_KEY_6。
@@ -65,10 +84,25 @@ function nextEnvName(envNames: string[]): string {
   return "";
 }
 
-export default function AddUpstreamKeyClient({ options }: { options: Option[] }) {
+export default function AddUpstreamKeyClient({
+  options,
+  catalogs,
+}: {
+  options: Option[];
+  /**
+   * 每個供應商現在有哪些模型（來自主機端每 6 小時抓的型錄）。
+   * 開新模型組時用來挑——讓人自己打字的話，打錯一個字設定檔看起來完全正常，
+   * 要等有人真的呼叫才 404（2026-09-21）。
+   */
+  catalogs: Record<string, CatalogModel[]>;
+}) {
   const router = useRouter();
   const [provider, setProvider] = useState("gemini");
   const [modelName, setModelName] = useState(options[0]?.modelName ?? "");
+  /** 開新模型組時：自己取的部署名、挑的模型、計價型態。 */
+  const [newName, setNewName] = useState("");
+  const [newModel, setNewModel] = useState("");
+  const [newPricing, setNewPricing] = useState("payg");
   const [envVar, setEnvVar] = useState("");
   const [envTouched, setEnvTouched] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -79,16 +113,33 @@ export default function AddUpstreamKeyClient({ options }: { options: Option[] })
   const [pending, setPending] = useState(0);
   const [statuses, setStatuses] = useState<Status[]>([]);
 
+  const isNew = modelName === NEW_GROUP;
   const chosen = useMemo(
     () => options.find((o) => o.modelName === modelName) ?? null,
     [options, modelName]
   );
+  /** 這個供應商的型錄，依分類排好。沒有型錄（沒抓到或不支援）就是空的。 */
+  const catalog = useMemo(() => catalogs[provider] ?? [], [catalogs, provider]);
+  const catalogByGroup = useMemo(() => {
+    const m = new Map<string, CatalogModel[]>();
+    for (const c of catalog) {
+      const arr = m.get(c.group);
+      if (arr) arr.push(c);
+      else m.set(c.group, [c]);
+    }
+    return [...m.entries()];
+  }, [catalog]);
 
   // 換模型組就重算建議的變數名。人動過那一格之後就不再覆蓋他打的東西。
   useEffect(() => {
     if (envTouched) return;
+    if (isNew) {
+      // 新模型組沒有既有變數可以推，給一個看得懂的起手式，讓人改。
+      setEnvVar(`${provider.toUpperCase()}_KEY_1`);
+      return;
+    }
     setEnvVar(chosen ? nextEnvName(chosen.envNames) : "");
-  }, [chosen, envTouched]);
+  }, [chosen, envTouched, isNew, provider]);
 
   async function refresh() {
     try {
@@ -114,7 +165,15 @@ export default function AddUpstreamKeyClient({ options }: { options: Option[] })
     setMsg(null);
 
     // 缺欄位要「講出來」，不是把按鈕變灰。
-    if (!chosen) return setErr("要先選一個模型組。");
+    if (isNew) {
+      if (!newName.trim()) return setErr("新模型組要取一個名字，那就是專案之後要送的字串。");
+      if (!newModel) return setErr("要挑一支模型。清單是這個供應商現在真的還有的那些。");
+      if (options.some((o) => o.modelName === newName.trim())) {
+        return setErr(`${newName.trim()} 已經存在了。要加進它，直接在上面的下拉選它就好。`);
+      }
+    } else if (!chosen) {
+      return setErr("要先選一個模型組。");
+    }
     if (!envVar.trim()) return setErr("環境變數名是空的。切換一次模型組會自動帶入建議值。");
     if (!apiKey.trim()) return setErr("金鑰是空的，請貼上供應商給你的那一串。");
 
@@ -125,12 +184,13 @@ export default function AddUpstreamKeyClient({ options }: { options: Option[] })
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider,
-          modelName,
-          backendModel: chosen.backendModel,
+          modelName: isNew ? newName.trim() : modelName,
+          backendModel: isNew ? PREFIX[provider] + newModel : chosen?.backendModel,
+          newGroup: isNew,
           envVar: envVar.trim(),
           key: apiKey.trim(),
           rpm: rpm ? Number(rpm) : 0,
-          pricingType: chosen.pricing,
+          pricingType: isNew ? newPricing : chosen?.pricing,
         }),
       });
       const d = await res.json();
@@ -184,8 +244,54 @@ export default function AddUpstreamKeyClient({ options }: { options: Option[] })
                 {o.modelName}（現有 {o.envNames.length} 把）
               </option>
             ))}
+            <option value={NEW_GROUP}>＋ 開一個新的模型組（自己挑模型）</option>
           </select>
         </label>
+
+        {/* 開新模型組（2026-09-21，User：「既然可以選擇模型了，那新增時也要可以選擇模型吧」）。
+            模型從型錄挑，不讓人打字——打錯一個字設定檔看起來完全正常，
+            要等有人真的呼叫才 404。 */}
+        {isNew ? (
+          <>
+            <label>
+              新模型組的名字（專案要送的就是這個）
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="例：gemini-smart-2"
+                spellCheck={false}
+              />
+            </label>
+
+            <label>
+              打哪一支模型
+              <select value={newModel} onChange={(e) => setNewModel(e.target.value)}>
+                <option value="">
+                  {catalog.length === 0 ? "這個供應商還沒有型錄（主機端每 6 小時抓一次）" : "請選擇"}
+                </option>
+                {catalogByGroup.map(([g, items]) => (
+                  <optgroup key={g} label={g}>
+                    {items.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.id}
+                        {c.stage === "preview" ? "（預覽版）" : ""}
+                        {c.expires ? `（${c.expires.slice(5)} 停用）` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              計價型態
+              <select value={newPricing} onChange={(e) => setNewPricing(e.target.value)}>
+                <option value="payg">隨用隨付</option>
+                <option value="free">免費額度</option>
+              </select>
+            </label>
+          </>
+        ) : null}
 
         <label>
           金鑰
@@ -236,7 +342,8 @@ export default function AddUpstreamKeyClient({ options }: { options: Option[] })
         {"送出前會先拿這把金鑰去打供應商的「列模型」端點，驗不過就不會寫進任何地方。驗過之後排進佇列，主機端每分鐘處理一次。"}
         <strong>　套用時閘道會重啟數秒，那期間所有請求會失敗，所以尖峰時段不要按。</strong>
         {"　套用失敗會自動把 .env 與設定檔回滾到原狀並把閘道重新拉起來。" +
-          "這個表單只能把金鑰加進既有的模型組當輪替的一把；要新增模型組是另一個功能。"}
+          "選「＋ 開一個新的模型組」就可以自己挑模型、自己取名；" +
+          "加進既有模型組時，那一把會跟組內其他金鑰輪替，打的是同一支模型。"}
       </div>
 
       {pending > 0 ? (
