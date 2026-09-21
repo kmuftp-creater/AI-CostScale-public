@@ -88,6 +88,46 @@ model_list:
     model_info:
       pricing_type: payg
 
+  # ══ 較強的模型 ══
+  # Vertex 上 3.x 的 pro 要用 -preview 結尾的名稱：gemini-3.1-pro／gemini-3-pro 都是 404。
+  # 單價（USD／百萬）：3.1-pro-preview 輸入 2.0、輸出 12.0；2.5-pro 輸入 1.25、輸出 10.0。
+  # 對照 flash-lite 的 0.25／1.5，約八倍，只在需要的環節用。
+  - model_name: gemini-3.1-pro-preview
+    litellm_params:
+      model: vertex_ai/gemini-3.1-pro-preview
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  - model_name: gemini-2.5-pro
+    litellm_params:
+      model: vertex_ai/gemini-2.5-pro
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  # ══ 用途別名 ══
+  # 專案只認 gemini-fast／gemini-smart，要升級模型時只改這裡指向哪一支，不必動專案程式。
+  # 名字必須是實際部署名（不能用萬用樣式）：金鑰白名單是從 /model/info 的部署名產生，
+  # 且刻意排除含 * 的項目。
+  - model_name: gemini-fast
+    litellm_params:
+      model: vertex_ai/gemini-3.1-flash-lite
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
+  - model_name: gemini-smart
+    litellm_params:
+      model: vertex_ai/gemini-3.1-pro-preview
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: global
+    model_info:
+      pricing_type: payg
+
   # 萬用比對：其餘 gemini-* 一律走 Vertex，新專案不必再加設定
   - model_name: "gemini-*"
     litellm_params:
