@@ -417,11 +417,23 @@ export async function getKeyInventory(): Promise<KeyInventory> {
 
   // 服務帳戶：Vertex 那些部署沒有 api_key，用的是閘道唯讀掛載的憑證檔。
   // 它是不折不扣的上游憑證，漏掉它會讓「十把金鑰」看起來就是全部。
+  //
+  // **要濾掉萬用部署展開出來的項目**（2026-09-21）。閘道的 /model/info 會把
+  // `gemini-*` 這條萬用規則展開成 LiteLLM 自己知道的每一支 Vertex 型號
+  // （model_name 直接等於後端名，例如 vertex_ai/gemini-2.0-flash），
+  // 那些不是我們設定的部署，而且多半是這個 GCP 專案根本沒開通的型號。
+  // 不濾的話，金鑰頁會把它們全部標成「供應商已無」——User 看到的是
+  // 「19 個要處理」，其中只有 0 個真的要處理。會跳警示的東西一旦混進雜訊，
+  // 人就會開始整片略過，那比沒有警示更糟。
+  //
+  // 用量仍然算全部（萬用路由打出去的也是這張憑證付的錢），只有「清單與檢查」限定設定檔有寫的。
+  const configNames = new Set(entries.filter((e) => !e.isWildcard).map((e) => e.modelName));
   const vertexIds = new Set<string>();
   const vertexModels: KeyDeployment[] = [];
   for (const d of live) {
     if (!d.backendModel.startsWith("vertex_ai/")) continue;
     vertexIds.add(d.id);
+    if (!configNames.has(d.modelName)) continue;
     if (vertexModels.length < 40) {
       vertexModels.push({ modelName: d.modelName, backendModel: d.backendModel, deploymentId: d.id });
     }
