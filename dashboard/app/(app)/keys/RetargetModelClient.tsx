@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 /**
@@ -77,6 +77,21 @@ export default function RetargetModelClient({
   const otherCount = candidates.length - sameGroup.length;
   const shown = showAll ? candidates : sameGroup;
 
+  /**
+   * 開啟時把「目前這一支」捲進視野（2026-09-21）。
+   *
+   * User：「目前在用的模型，目前這兩個字是否應該明顯一點才好找」。
+   * 清單有三十幾列而且捲動區只有 260px 高，現在用的那一支常常在視野外——
+   * 要換模型的人第一件事就是找「我現在在哪」，找不到就只能一列一列讀。
+   * block: "center" 而不是 "nearest"：捲到中間才看得到它的上下文（前後有什麼可選）。
+   */
+  const currentRef = useRef<HTMLLabelElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const el = currentRef.current;
+    if (el) el.scrollIntoView({ block: "center" });
+  }, [open, showAll]);
+
   async function submit() {
     if (!picked) return setErr("先選一支要換成什麼");
     setBusy(true);
@@ -142,7 +157,11 @@ export default function RetargetModelClient({
         ) : (
           <div className="model-pick">
             {shown.map((c) => (
-              <label key={c.id} className="model-opt">
+              <label
+                key={c.id}
+                className={`model-opt${c.id === currentId ? " m-current" : ""}`}
+                ref={c.id === currentId ? currentRef : undefined}
+              >
                 <input
                   type="radio"
                   name={`retarget-${modelName}`}
@@ -151,7 +170,8 @@ export default function RetargetModelClient({
                   disabled={c.id === currentId}
                 />
                 <code>{c.id}</code>
-                {c.id === currentId ? <span className="m-hint">目前</span> : null}
+                {/* 「目前」要一眼看到，不能跟能力標籤長得一樣（2026-09-21）。 */}
+                {c.id === currentId ? <span className="m-now">目前使用中</span> : null}
                 {/* 分類一定要寫出來。只顯示能力標籤的話，文字模型看起來會像「只會看圖」。 */}
                 {showAll || c.group !== currentGroup ? (
                   <span className="m-hint">〔{c.group}〕</span>

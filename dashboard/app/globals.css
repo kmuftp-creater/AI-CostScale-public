@@ -2245,3 +2245,24 @@ td.t-act button {
   cursor: pointer; font-size: 0.78rem; color: var(--muted); margin: 6px 0;
 }
 .ledger tr.k-models details.m-catalog > summary:hover { color: var(--ink); }
+
+/* 換模型清單：「目前使用中」那一列要一眼看到（2026-09-21，User：「目前這兩個字
+   是否應該明顯一點才好找」）。清單有三十幾列、捲動區只有 260px，
+   小字跟能力標籤混在一起等於沒有標。 */
+.model-opt.m-current {
+  background: var(--accent-dim);
+  border-radius: 5px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+}
+.model-opt.m-current code { color: var(--ink); font-weight: 700; }
+.model-opt .m-now {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  white-space: nowrap;
+}
