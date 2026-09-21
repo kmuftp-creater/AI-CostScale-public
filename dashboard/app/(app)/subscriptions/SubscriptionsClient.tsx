@@ -86,6 +86,10 @@ type Charge = {
   /** 信用卡帳單上的實際入帳金額，人工填。null＝尚未對帳。 */
   actual_twd: string | number | null;
   reconciled_at: string | null;
+  /** 'auto'＝排程在扣款日凍結的；'manual'＝人工補的（升級差額之類）。 */
+  source?: string;
+  /** 人工補這筆的理由。 */
+  note?: string | null;
 };
 
 export default function SubscriptionsClient({
@@ -130,6 +134,20 @@ export default function SubscriptionsClient({
   const [charges, setCharges] = useState(initialCharges);
   const [reconId, setReconId] = useState<number | null>(null);
   const [reconVal, setReconVal] = useState("");
+  /**
+   * 人工補一筆扣款（2026-09-21）。
+   *
+   * User：「升級是補差額，我有可能是這個月想從 5X 升級成 10X」。
+   * 排程只在扣款日凍結固定月費，升級當下補的差額沒有地方記，帳面會少一筆真的付出去的錢。
+   * 注意這跟「改月費」是兩件事：改月費影響的是**以後**每個月，補差額是**這一次**。
+   */
+  const [addingCharge, setAddingCharge] = useState(false);
+  const [mcSubId, setMcSubId] = useState("");
+  const [mcDate, setMcDate] = useState("");
+  const [mcFee, setMcFee] = useState("");
+  const [mcCurrency, setMcCurrency] = useState("USD");
+  const [mcNote, setMcNote] = useState("");
+  const [mcError, setMcError] = useState<string | null>(null);
 
   /** 每月等值的台幣金額。年繳先除 12，否則加總會把一筆年繳當成十二倍。 */
   const toTwd = (r: Row) => {
@@ -176,6 +194,53 @@ export default function SubscriptionsClient({
           reconciled.length) *
         100;
   const assumedMarkupPct = charges.length > 0 ? Number(charges[0].markup_pct) : null;
+
+  /** 今天（台北）。伺服器端會擋未來日期，這裡給預設值也用同一個基準。 */
+  function todayTaipei(): string {
+    return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  }
+
+  function openAddCharge() {
+    const first = active[0];
+    setMcSubId(first ? String(first.id) : "");
+    setMcCurrency(first ? first.currency : "USD");
+    setMcDate(todayTaipei());
+    setMcFee("");
+    setMcNote("");
+    setMcError(null);
+    setAddingCharge(true);
+  }
+
+  async function submitManualCharge(e: React.FormEvent) {
+    e.preventDefault();
+    setMcError(null);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/subscription-charges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subId: Number(mcSubId),
+          chargedOn: mcDate,
+          fee: Number(mcFee),
+          currency: mcCurrency,
+          note: mcNote,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      // 依扣款日插回正確位置：這張表是照日期新到舊排的。
+      setCharges((prev) =>
+        [data.charge as Charge, ...prev].sort((a, b) => b.charged_on.localeCompare(a.charged_on))
+      );
+      setAddingCharge(false);
+      router.refresh();
+    } catch (err) {
+      setMcError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   /** 填入（或清除）某一筆的實際入帳金額。 */
   async function saveActual(id: number, value: string) {
@@ -604,14 +669,85 @@ export default function SubscriptionsClient({
           <div className="panel-head">
             <span className="panel-title">扣款歷史</span>
             <span className="microlabel">匯率已凍結，不隨今日匯率變動</span>
+            <button
+              className="btn-ghost"
+              type="button"
+              onClick={() => (addingCharge ? setAddingCharge(false) : openAddCharge())}
+              disabled={active.length === 0}
+            >
+              {addingCharge ? "取消" : "補一筆"}
+            </button>
           </div>
+
+          {addingCharge ? (
+            <form onSubmit={submitManualCharge} className="sub-form">
+              <label>
+                訂閱
+                <select
+                  value={mcSubId}
+                  onChange={(e) => {
+                    setMcSubId(e.target.value);
+                    const r = active.find((x) => String(x.id) === e.target.value);
+                    if (r) setMcCurrency(r.currency);
+                  }}
+                >
+                  {active.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.service}
+                      {r.plan ? `（${r.plan}）` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                扣款日
+                <input type="date" value={mcDate} max={todayTaipei()} onChange={(e) => setMcDate(e.target.value)} />
+              </label>
+              <label>
+                金額
+                <input
+                  value={mcFee}
+                  onChange={(e) => setMcFee(e.target.value)}
+                  placeholder="只填這次實付的差額"
+                  inputMode="decimal"
+                />
+              </label>
+              <label>
+                幣別
+                <select value={mcCurrency} onChange={(e) => setMcCurrency(e.target.value)}>
+                  <option value="USD">USD</option>
+                  <option value="TWD">TWD</option>
+                </select>
+              </label>
+              <label>
+                說明
+                <input
+                  value={mcNote}
+                  onChange={(e) => setMcNote(e.target.value)}
+                  placeholder="例：5X 升級 10X 補差額"
+                />
+              </label>
+              <button className="btn-primary" type="submit" disabled={busy}>
+                {busy ? "寫入中…" : "補這一筆"}
+              </button>
+            </form>
+          ) : null}
+          {addingCharge ? (
+            <div className="ledger-note">
+              這裡補的是<strong>這一次實際多付的錢</strong>（例如月中升級補的差額），
+              用今天的匯率換算並標成「手動」。
+              <strong>要改的是以後每個月的月費，請用上面那張表的「編輯」</strong>——
+              兩件事分開做，帳才對得起來。
+            </div>
+          ) : null}
+          {mcError ? <div className="form-error">{mcError}</div> : null}
 
           {charges.length === 0 ? (
             <div className="empty-state">
               <span className="microlabel">Empty</span>
               {"還沒有任何已發生的扣款紀錄。每天早上抓匯率時會檢查有沒有訂閱在當天扣款，" +
                 "有的話就把當天的匯率連同金額一起凍結寫進這裡，之後不再重算。" +
-                "第一筆會在最近一個扣款日出現。"}
+                "第一筆會在最近一個扣款日出現。月中升級補的差額不會自己出現，用右上角的「補一筆」記進來。"}
             </div>
           ) : (
             <>
@@ -678,7 +814,14 @@ export default function SubscriptionsClient({
                     const isTwd = c.currency === "TWD";
                     return (
                       <tr key={c.id}>
-                        <td>{c.charged_on}</td>
+                        <td>
+                          {c.charged_on}
+                          {c.source === "manual" ? (
+                            <span className="microlabel" style={{ display: "block" }}>
+                              手動{c.note ? ` · ${c.note}` : ""}
+                            </span>
+                          ) : null}
+                        </td>
                         <td>{c.service}</td>
                         <td>
                           {c.currency} {Number(c.fee).toLocaleString("zh-TW")}

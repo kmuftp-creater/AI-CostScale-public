@@ -97,11 +97,17 @@ def main() -> int:
 
             # ON CONFLICT DO NOTHING：同一天重跑不覆蓋已凍結的匯率。
             # 這是刻意的——凍結的意義就是寫進去之後不再變。
+            #
+            # **WHERE source = 'auto' 不能省**（2026-09-21）：唯一性已經從
+            # UNIQUE (sub_id, charged_on) 改成只管自動入帳的部分唯一索引
+            # （db/init/27），為的是讓人可以在同一天補一筆升級差額。
+            # ON CONFLICT 的推斷條件必須與該索引完全相同，否則 PostgreSQL
+            # 會報「no unique or exclusion constraint matching」，每月凍結整個失敗。
             cur.execute("""
                 INSERT INTO costscale.subscription_charges
-                    (sub_id, charged_on, fee, currency, fx_rate, fx_source, markup_pct, amount_twd)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (sub_id, charged_on) DO NOTHING
+                    (sub_id, charged_on, fee, currency, fx_rate, fx_source, markup_pct, amount_twd, source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'auto')
+                ON CONFLICT (sub_id, charged_on) WHERE source = 'auto' DO NOTHING
             """, (sub_id, today, round(fee, 6), currency, round(used_rate, 6),
                   used_source, round(used_markup, 3), round(amount, 2)))
             if cur.rowcount:

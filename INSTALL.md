@@ -475,6 +475,16 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db psql -
 
 `git pull` 之前可以用 `git diff --stat HEAD origin/main -- db/init` 看有沒有新的 SQL 檔。
 
+**`27-manual-subscription-charges.sql` 要跟程式一起更新，不能只做一邊**（2026-09-21）。
+它把訂閱扣款的唯一性從「整張表」縮小成「只管自動入帳」，好讓人能在同一天補一筆升級差額。
+`scripts/fetch-fx.py` 的寫入語法必須配合那個索引——只更新程式沒套 SQL，或只套 SQL 沒更新程式，
+每天的訂閱月費凍結都會失敗（錯誤訊息是 `no unique or exclusion constraint matching`）。
+套完用這個確認當天的入帳還跑得動：
+
+```bash
+cd /opt/costscale && bash scripts/run-fx-fetch.sh
+```
+
 ---
 
 ## 13. 打不通的時候

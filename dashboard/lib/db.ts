@@ -793,6 +793,10 @@ export type SubscriptionChargeRow = {
   /** 信用卡外幣交易手續費率（%）。TWD 時是 0。 */
   markup_pct: string;
   amount_twd: string;
+  /** 'auto'＝排程在扣款日凍結的；'manual'＝人工補的（升級差額之類）。 */
+  source: string;
+  /** 人工補這筆的理由。自動入帳是 null。 */
+  note: string | null;
   /** 信用卡帳單上的實際入帳金額，人工填。null 表示尚未對帳。 */
   actual_twd: string | null;
   reconciled_at: string | null;
@@ -1225,6 +1229,59 @@ export async function getUnitEconomics(fxRate: number): Promise<UnitEconomics> {
   }
 }
 
+/**
+ * 人工補一筆訂閱扣款（2026-09-21）。
+ *
+ * User 的情境：「升級是補差額…這個月想從 5X 升級成 10X」。
+ * 排程只在 billing_day 凍結固定月費，升級當下補的那筆差額沒有地方記，
+ * 帳面就會少掉一筆真的付出去的錢。
+ *
+ * 算法**與排程完全相同**（fee × 匯率 × (1 + 手續費率)），差別只有三點：
+ *   1. source 記 'manual'，看得出這筆是事後補的。
+ *   2. fx_source 前面加 manual:，因為補的時候用的是「今天」的匯率，
+ *      不是扣款當天的——隔了幾天就會有差，不標示的話沒人知道。
+ *   3. 幣別是台幣時不換匯也不加手續費，跟排程一致。
+ *
+ * 這支**不做 upsert**。人工補的就是一筆新紀錄，重複按兩次會有兩筆，
+ * 那是操作者要負責的事；自動去猜「這筆是不是重複」反而會吃掉合法的第二筆。
+ */
+export async function addManualCharge(params: {
+  subId: number;
+  chargedOn: string;
+  fee: number;
+  currency: string;
+  note: string | null;
+}): Promise<SubscriptionChargeRow> {
+  const client = getPool();
+  const fx = await getFxRate();
+  const isTwd = params.currency.toUpperCase() === "TWD";
+  const rate = isTwd ? 1 : fx.baseRate;
+  const markup = isTwd ? 0 : fx.markupPct;
+  const amount = params.fee * rate * (1 + markup / 100);
+
+  const result = await client.query<SubscriptionChargeRow>(
+    `INSERT INTO costscale.subscription_charges
+       (sub_id, charged_on, fee, currency, fx_rate, fx_source, markup_pct, amount_twd, source, note)
+     VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, 'manual', $9)
+     RETURNING id, sub_id, to_char(charged_on, 'YYYY-MM-DD') AS charged_on,
+               fee, currency, fx_rate, fx_source, markup_pct, amount_twd,
+               source, note, actual_twd, reconciled_at,
+               (SELECT service FROM costscale.subscriptions WHERE id = sub_id) AS service`,
+    [
+      params.subId,
+      params.chargedOn,
+      params.fee.toFixed(6),
+      params.currency.toUpperCase(),
+      rate.toFixed(6),
+      isTwd ? "n/a" : `manual:${fx.source}`,
+      markup.toFixed(3),
+      amount.toFixed(2),
+      params.note,
+    ]
+  );
+  return result.rows[0];
+}
+
 export async function listSubscriptionCharges(limit = 60): Promise<SubscriptionChargeRow[]> {
   try {
     const client = getPool();
@@ -1238,7 +1295,7 @@ export async function listSubscriptionCharges(limit = 60): Promise<SubscriptionC
               to_char(c.charged_on, 'YYYY-MM-DD') AS charged_on,
               c.fee, c.currency,
               c.fx_rate, c.fx_source, c.markup_pct, c.amount_twd,
-              c.actual_twd, c.reconciled_at
+              c.source, c.note, c.actual_twd, c.reconciled_at
          FROM costscale.subscription_charges c
          JOIN costscale.subscriptions s ON s.id = c.sub_id
         ORDER BY c.charged_on DESC, s.service ASC
@@ -2986,7 +3043,32 @@ export async function getSubscriptionSavings(
       `SELECT service, fee, currency, billing_cycle
          FROM costscale.subscriptions WHERE status = 'active'`
     );
+
+    // 這段期間**實際凍結**的扣款（2026-09-21）。
+    //
+    // 在這之前這裡一律用「現在的月費」去算任何月份，所以改一次價，
+    // 回頭看上個月的比較也會跟著用新價（User 問升級會不會影響舊金額時查出來的）。
+    // 月費會變——升級、降級、漲價——而 subscription_charges 存的是
+    // 當時真的扣了多少，那才是「那個月的成本」。
+    //
+    // 人工補的差額（source = 'manual'）一起算進來：它同樣是真的付出去的錢。
+    const charged = await client.query(
+      `SELECT s.service, COALESCE(SUM(c.amount_twd), 0) AS twd, COUNT(*) AS n
+         FROM costscale.subscription_charges c
+         JOIN costscale.subscriptions s ON s.id = c.sub_id
+        WHERE c.charged_on >= $1::date AND c.charged_on < $2::date
+        GROUP BY s.service`,
+      [from, to]
+    );
+    const chargedOf = new Map<string, number>();
+    for (const r of charged.rows) chargedOf.set(String(r.service), Number(r.twd) || 0);
+
     const feeOf = (service: string): number => {
+      // 這段期間有實際扣款紀錄就用它——那是當時真的付的錢。
+      const actual = chargedOf.get(service);
+      if (actual !== undefined && actual > 0) return actual;
+      // 沒有就退回現在的月費。看「最近七天」這種不含扣款日的區間會走到這裡，
+      // 給的是整月月費——與這個面板一直以來的行為相同（月費不按日拆）。
       const row = subs.rows.find((s) => String(s.service) === service);
       if (!row) return 0;
       const perMonth = monthlyEquivalentFee(Number(row.fee) || 0, String(row.billing_cycle));
