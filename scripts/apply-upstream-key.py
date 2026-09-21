@@ -326,10 +326,25 @@ def gateway_ok(timeout_s=90):
 
 
 def restart_gateway():
+    """讓閘道重新載入設定。
+
+    **必須是 --force-recreate，不能只有 up -d**（2026-09-21 踩到，L-253）。
+    `docker compose up -d` 只比對「服務定義」有沒有變；設定檔是 bind mount，
+    改了它不算服務定義變動，於是 compose 回 up-to-date、容器動都沒動，
+    新設定完全沒生效。
+
+    實際後果：User 在畫面上把 gemini-studio-paid 換成 3.5-flash，
+    套用後的驗證發現閘道仍指向 2.5-flash，於是整批回滾——
+    他看到的是「改完切頁回來又恢復了」。
+
+    新增／移除金鑰那兩條路徑不會踩到，因為它們同時改 .env（環境變數屬於服務定義），
+    所以 compose 本來就會重建。但那是巧合，不是設計——一個永遠正確的方法
+    勝過兩個要挑對的方法。代價是每次多幾秒停機，而介面本來就警告過會重啟。
+    """
     if NO_RESTART:
         log("（測試模式）略過重啟閘道")
         return
-    subprocess.run(COMPOSE + ["up", "-d", "litellm"], cwd=ROOT,
+    subprocess.run(COMPOSE + ["up", "-d", "--force-recreate", "litellm"], cwd=ROOT,
                    capture_output=True, text=True, timeout=300)
 
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatTaipei } from "@/lib/format";
 
 /**
  * 新增上游金鑰（2026-09-07）。
@@ -257,7 +258,9 @@ export default function AddUpstreamKeyClient({ options }: { options: Option[] })
           <tbody>
             {statuses.map((s) => (
               <tr key={s.id}>
-                <td className="microlabel">{s.at ? s.at.slice(0, 19).replace("T", " ") : "—"}</td>
+                {/* 主機在 UTC，直接印原字串會比台北時間早八小時——
+                    User 2026-09-21 看到 09:43 而他當下是 17:43，以為是別人在動系統。 */}
+                <td className="microlabel">{formatTaipei(s.at, true)}</td>
                 <td>{s.state === "applied" ? "成功" : "失敗"}</td>
                 <td className="microlabel">
                   {s.envVar ?? "—"}
