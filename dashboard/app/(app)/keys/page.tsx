@@ -120,20 +120,27 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
   const candidatesFor = (c: ModelCheck): Candidate[] => {
     if (!cat?.ok) return [];
     const want = c.meta?.group ?? null;
-    const out: Candidate[] = [];
+    const same: Candidate[] = [];
+    const other: Candidate[] = [];
     for (const id of cat.models) {
       const m = metaOf(data, cat, id);
-      if (want && m && m.group !== want) continue;
-      out.push({
+      const item: Candidate = {
         id,
         group: m?.group ?? "其他",
         tags: m?.tags ?? [],
         stage: m?.stage ?? "",
         expires: m?.expires ?? "",
-      });
-      if (out.length >= 60) break;
+      };
+      // 同類的排前面、全部給；其他分類也給（上限 40），由對話框決定要不要顯示。
+      // 原本在這裡就把別的分類濾掉，結果畫面上只剩「看圖」這個標籤，
+      // 看起來像「這些模型只會看圖」——User 2026-09-21 就是這樣問的。
+      if (!want || item.group === want) {
+        if (same.length < 80) same.push(item);
+      } else if (other.length < 40) {
+        other.push(item);
+      }
     }
-    return out;
+    return [...same, ...other];
   };
   const groups = groupModels(data, cat, cat?.models ?? []);
   // 自訂單價寫在設定檔的 model_info，checkDeployments 只認得後端模型名，
@@ -175,6 +182,7 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
                       <RetargetModelClient
                         modelName={c.modelName}
                         currentBackend={c.backendModel}
+                        currentGroup={c.meta?.group ?? null}
                         candidates={candidatesFor(c)}
                       />
                     </p>
@@ -187,6 +195,7 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
                       <RetargetModelClient
                         modelName={c.modelName}
                         currentBackend={c.backendModel}
+                        currentGroup={c.meta?.group ?? null}
                         candidates={candidatesFor(c)}
                       />
                     </p>
@@ -276,6 +285,7 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
                               <RetargetModelClient
                                 modelName={c.modelName}
                                 currentBackend={c.backendModel}
+                                currentGroup={c.meta?.group ?? null}
                                 candidates={candidatesFor(c)}
                               />{" "}
                               <PriceModelClient
@@ -311,7 +321,7 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
               </details>
 
               <p className="k-note m-foot">
-                上面那張表是**閘道實際在用的**，每一列都可以換。
+                上面那張表是<strong>閘道實際在用的</strong>，每一列都可以換。
                 「停用」日期只有 OpenRouter 會直說，其他家是拿同名模型交叉參考來的，不是原廠公告；
                 沒有日期不代表安全，只代表沒人講。
               </p>
