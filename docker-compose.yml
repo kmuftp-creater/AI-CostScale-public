@@ -22,7 +22,20 @@ services:
       retries: 12
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    # **釘在特定映像，不用浮動標籤**（2026-09-21）。
+    #
+    # `main-stable` 是會動的：某天 docker compose pull 之後閘道就換了版本，
+    # 而你不會事先知道，也無從得知換了什麼。這是對外服務的代理，
+    # 而且它**每次啟動都會自動跑資料庫遷移**（prisma migrate deploy，71 張表），
+    # 升級會改表結構、降版不保證相容——這種東西不該在你沒挑時間的時候自己換。
+    #
+    # 這個 digest 是 litellm 1.97.0（映像建於 2026-08-16）。
+    # 要升級時：**先備份資料庫**，把下面這行換成新的 digest，
+    # `docker compose ... up -d litellm`，然後驗「改動有沒有生效」而不是只看健康檢查。
+    # 完整步驟見 INSTALL 的「更新到新版」。
+    #
+    # 代價要知道：安全更新不會自己來，要自己盯 LiteLLM 的發布。
+    image: ghcr.io/berriai/litellm@sha256:468c25f35f3e5ec4e414974f00deab93337b1b4d9953cabcfd3722e59415f834
     restart: unless-stopped
     depends_on:
       db:

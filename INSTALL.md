@@ -475,6 +475,49 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db psql -
 
 `git pull` 之前可以用 `git diff --stat HEAD origin/main -- db/init` 看有沒有新的 SQL 檔。
 
+### 升級閘道（LiteLLM）
+
+`docker-compose.yml` 把閘道**釘在特定的映像 digest**，不是 `main-stable` 這種會動的標籤。
+所以上面那兩個指令**不會**換掉閘道版本，升級是你主動做的事。
+
+這樣設計的理由：閘道是對外服務的代理，而且它**每次啟動都會自動跑資料庫遷移**
+（`prisma migrate deploy`，LiteLLM 自己有 70 幾張表）。升級會改表結構、**降版不保證相容**，
+這種東西不該在沒人盯著的時候自己換。代價是安全更新不會自己來，要自己盯 LiteLLM 的發布。
+
+升級步驟：
+
+```bash
+cd /opt/costscale && docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db pg_dump -U costscale costscale | gzip > /root/costscale-db-$(date +%Y%m%d).sql.gz
+```
+
+```bash
+docker pull ghcr.io/berriai/litellm:main-stable && docker image inspect ghcr.io/berriai/litellm:main-stable --format '{{index .RepoDigests 0}}'
+```
+
+把印出來的 `ghcr.io/berriai/litellm@sha256:…` 貼進 `docker-compose.yml` 的 `image:`，然後：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d litellm
+```
+
+**改 `image:` 那一行會讓容器重建**，閘道有數十秒不可用，挑離峰時段做。
+
+起來之後**驗「改動有沒有生效」，不是只看服務還活著**：
+
+```bash
+curl -s -o /dev/null -w "%{http_code}
+" http://127.0.0.1:4400/health/liveliness && curl -s http://127.0.0.1:4400/model/info -H "Authorization: Bearer $(grep '^LITELLM_MASTER_KEY=' .env | cut -d= -f2-)" | python3 -c "import sys,json; d=json.load(sys.stdin); print('部署數', len(d['data']))"
+```
+
+再實際打一次（回得出東西才算數）：
+
+```bash
+curl -s http://127.0.0.1:4400/v1/chat/completions -H "Authorization: Bearer $(grep '^LITELLM_MASTER_KEY=' .env | cut -d= -f2-)" -H 'Content-Type: application/json' -d '{"model":"gemini-flash-free","messages":[{"role":"user","content":"回一個字：好"}],"max_tokens":60}'
+```
+
+不對勁就把 `image:` 換回舊的 digest 再 `up -d litellm`；如果新版已經改過資料表結構，
+還要用上面備份的檔案還原資料庫——**這就是第一步要先備份的原因**。
+
 **`27-manual-subscription-charges.sql` 要跟程式一起更新，不能只做一邊**（2026-09-21）。
 它把訂閱扣款的唯一性從「整張表」縮小成「只管自動入帳」，好讓人能在同一天補一筆升級差額。
 `scripts/fetch-fx.py` 的寫入語法必須配合那個索引——只更新程式沒套 SQL，或只套 SQL 沒更新程式，
