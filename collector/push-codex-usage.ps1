@@ -57,16 +57,26 @@ if (-not $localApp) { $localApp = $PSScriptRoot }
 $LogPath    = Join-Path $localApp 'costscale-codex-usage.log'
 
 # 迴圈改成每輪都留痕之後一天約 200 行。留個上限免得長到沒人想開。
-# 超過 1 MB 只保留最後 2000 行；截斷本身也寫一行，不要靜悄悄地掉資料。
+# 超過 1 MB 只保留最後 N 行；截斷本身也寫一行，不要靜悄悄地掉資料。
+#
+# 2026-09-21：保留行數從 2000 降到 400，而且**保留時每行也要截斷**。
+# 原因是舊版留下的警告行一行就兩萬多字元，「保留最後 2000 行」之後檔案還有 6.7 MB，
+# 於是每寫一行都觸發一次輪替、每次都重寫 6.7 MB，那些巨大的行永遠洗不掉。
 $LogMaxBytes  = 1MB
-$LogKeepLines = 2000
+$LogKeepLines = 400
+$LogMaxLineLen = 400
 
 function Write-Log {
   param([string]$Message)
-  $line = "{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
+  # 訊息一定要截斷（2026-09-21）：解析失敗的警告會把整行 JSON 貼進來，一行就好幾 MB。
+  # 結果是「保留最後 2000 行」之後檔案還有 4 MB，之後每寫一行都在重寫 4 MB。
+  if ($Message.Length -gt 400) { $Message = $Message.Substring(0, 400) + '…（已截斷）' }
+  $line = "{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), ($Message -replace '?
+', ' ')
   try {
     if ((Test-Path $LogPath) -and ((Get-Item $LogPath).Length -gt $LogMaxBytes)) {
-      $keep = Get-Content -Path $LogPath -Tail $LogKeepLines -Encoding utf8
+      $keep = Get-Content -Path $LogPath -Tail $LogKeepLines -Encoding utf8 |
+        ForEach-Object { if ($_.Length -gt $LogMaxLineLen) { $_.Substring(0, $LogMaxLineLen) + '…（已截斷）' } else { $_ } }
       Set-Content -Path $LogPath -Value $keep -Encoding utf8 -ErrorAction Stop
       $note = "{0}  ROTATE 紀錄檔超過 1 MB，只保留最後 {1} 行" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $LogKeepLines
       Add-Content -Path $LogPath -Value $note -Encoding utf8 -ErrorAction Stop
@@ -226,14 +236,58 @@ if ($files.Count -eq 0) {
   exit 0
 }
 
+# 讀檔案最後 N 個位元組，回傳完整的那幾行（開頭被切一半的那行丟掉）。
+#
+# 為什麼不用 Get-Content -Tail（2026-09-21 實測）：
+# Codex 的 rollout 檔會長到 90 MB 以上，而且單行動輒好幾 MB。
+# `Get-Content -LiteralPath <92MB> -Tail 200 -Encoding UTF8` **跑超過十分鐘還沒回來**，
+# 一個大檔就把整輪收集卡死——這正是 9/19 之後用量完全沒進資料庫的原因。
+# 直接 Seek 到檔尾讀固定長度的位元組，同一個檔 0.1 秒以內。
+# 用 ReadWrite 共用模式開檔：Codex 正在寫的那個檔不能因為被鎖住就跳過。
+function Read-TailText {
+  param([string]$Path, [int64]$Bytes)
+  $fs = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+  try {
+    $len  = $fs.Length
+    $take = [int][Math]::Min($len, $Bytes)
+    $null = $fs.Seek($len - $take, 'Begin')
+    $buf  = New-Object byte[] $take
+    $read = 0
+    while ($read -lt $take) {
+      $n = $fs.Read($buf, $read, $take - $read)
+      if ($n -le 0) { break }
+      $read += $n
+    }
+  } finally { $fs.Dispose() }
+  $txt = [System.Text.Encoding]::UTF8.GetString($buf, 0, $read)
+  if ($take -lt $len) {
+    # 開頭那行八成被切掉一半，丟掉免得解析失敗被誤記成「這個檔壞了」。
+    $i = $txt.IndexOf("`n")
+    if ($i -ge 0) { $txt = $txt.Substring($i + 1) }
+  }
+  return $txt
+}
+
 function Get-TailFacts {
   # 讀一次檔尾就把兩件事都撈出來：最後一個 token_count 事件、最後一個 turn_context。
   # 分兩次讀等於把 24 MB 的檔案掃兩遍，沒必要。
   # 參數名絕對不能叫 $Args（見檔頭第 3 點）。
+  #
+  # $Tail 現在是「往回讀幾個位元組」的倍率來源，不是行數：先讀 4 MB，
+  # 找不到就放大到 48 MB，再找不到才整份掃。token_count 事件是每一輪都寫的，
+  # 4 MB 幾乎一定夠；turn_context 偶爾要往前找比較遠。
   param([string]$Path, [int]$Tail)
 
   $result = @{ TokenLine = $null; Model = $null }
-  $candidates = Get-Content -LiteralPath $Path -Tail $Tail -Encoding UTF8 -ErrorAction SilentlyContinue
+  $candidates = $null
+  foreach ($chunk in 4MB, 48MB) {
+    try { $candidates = (Read-TailText -Path $Path -Bytes $chunk) -split "`n" } catch { $candidates = $null }
+    if ($candidates) {
+      $hasToken = $false
+      foreach ($l in $candidates) { if ($l -like '*"total_token_usage"*') { $hasToken = $true; break } }
+      if ($hasToken) { break }
+    }
+  }
   if ($candidates) {
     for ($i = $candidates.Count - 1; $i -ge 0; $i--) {
       $line = $candidates[$i]
@@ -247,7 +301,8 @@ function Get-TailFacts {
   }
   if (-not $result.TokenLine) {
     # 退路：整份掃。只有極短或極特殊的檔會走到這裡。
-    $all = Get-Content -LiteralPath $Path -Encoding UTF8 -ErrorAction SilentlyContinue
+    $all = $null
+    try { $all = (Read-TailText -Path $Path -Bytes 2GB) -split "`n" } catch { $all = $null }
     if ($all) {
       for ($i = $all.Count - 1; $i -ge 0; $i--) {
         $line = $all[$i]
@@ -318,14 +373,10 @@ if ($sessions.Count -eq 0) {
   exit 0
 }
 
-$body = @{
-  source   = 'codex-cli'
-  host     = $env:COMPUTERNAME
-  sessions = @($sessions)
-} | ConvertTo-Json -Depth 6 -Compress
-
 if ($DryRun) {
-  Write-Output "DryRun：$($sessions.Count) 個 session（跳過 $skipped），共 $($body.Length) 位元組"
+  $preview = @{ source = 'codex-cli'; host = $env:COMPUTERNAME; sessions = @($sessions) } |
+    ConvertTo-Json -Depth 6 -Compress
+  Write-Output "DryRun：$($sessions.Count) 個 session（跳過 $skipped），共 $($preview.Length) 位元組"
   $sessions | Select-Object -First 3 | ForEach-Object { $_ | ConvertTo-Json -Compress | Write-Output }
   exit 0
 }
@@ -333,16 +384,35 @@ if ($DryRun) {
 # ── 送出 ─────────────────────────────────────────────────────────────
 # 用管線把 UTF-8 內容交給外部程式會被加上 BOM（LESSONS L-137），
 # 這裡走 Invoke-RestMethod 直接送位元組，不經管線。
-try {
-  $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
-  $res = Invoke-RestMethod -Uri $Endpoint -Method Post -Body $bytes `
-    -ContentType 'application/json; charset=utf-8' `
-    -Headers @{ Authorization = "Bearer $Token" } `
-    -TimeoutSec 30
-  Write-Log ("OK 送出 {0} 個 session，寫入 {1}，跳過 {2}" -f $sessions.Count, $res.written, $skipped)
-  Write-Output ("送出 {0} 個 session，伺服器寫入 {1} 筆。" -f $sessions.Count, $res.written)
-} catch {
-  Write-Log "ERROR 送出失敗：$($_.Exception.Message)"
-  Write-Error "送出失敗：$($_.Exception.Message)"
-  exit 1
+#
+# **一定要分批。** 伺服器端 /api/cli-usage 限制一次最多 500 筆，
+# 補送（-Days 60）一送就是七百多個 session，整批會被退 400，
+# 而且錯誤訊息只說 Bad Request，看不出是筆數問題（2026-09-21 踩到）。
+$BatchSize = 200
+$totalSent = 0
+$totalWritten = 0
+for ($i = 0; $i -lt $sessions.Count; $i += $BatchSize) {
+  $end = [Math]::Min($i + $BatchSize, $sessions.Count) - 1
+  $chunk = @($sessions[$i..$end])
+  $body = @{
+    source   = 'codex-cli'
+    host     = $env:COMPUTERNAME
+    sessions = $chunk
+  } | ConvertTo-Json -Depth 6 -Compress
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+    $res = Invoke-RestMethod -Uri $Endpoint -Method Post -Body $bytes `
+      -ContentType 'application/json; charset=utf-8' `
+      -Headers @{ Authorization = "Bearer $Token" } `
+      -TimeoutSec 60
+    $totalSent += $chunk.Count
+    $totalWritten += [int]$res.written
+    Write-Log ("OK 第 {0} 批送出 {1} 個 session，寫入 {2}" -f ([int]($i / $BatchSize) + 1), $chunk.Count, $res.written)
+  } catch {
+    Write-Log "ERROR 第 $([int]($i / $BatchSize) + 1) 批送出失敗：$($_.Exception.Message)"
+    Write-Error "送出失敗（第 $([int]($i / $BatchSize) + 1) 批，已成功 $totalSent 個）：$($_.Exception.Message)"
+    exit 1
+  }
 }
+Write-Log ("OK 全部送出 {0} 個 session，寫入 {1}，跳過 {2}" -f $totalSent, $totalWritten, $skipped)
+Write-Output ("送出 {0} 個 session，伺服器寫入 {1} 筆。" -f $totalSent, $totalWritten)

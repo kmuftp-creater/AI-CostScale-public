@@ -7,6 +7,7 @@ import BigScreenLink from "./BigScreenLink";
 import DateRangeSeg from "./DateRangeSeg";
 import BudgetBanner from "./BudgetBanner";
 import ReminderBanner from "./ReminderBanner";
+import ModelExpiryBanner from "./ModelExpiryBanner";
 
 async function doSignOut() {
   "use server";
@@ -71,6 +72,11 @@ export default function AppShell({
         {/* 與預算橫幅分開：預算是正在發生的事，提醒是即將要做的決定 */}
         <Suspense fallback={null}>
           <ReminderBanner />
+        </Suspense>
+        {/* 閘道在用的模型十天內要停用（2026-09-21）。單獨一條是因為它的處理方式
+            跟前兩者不同：要換模型、重測、重部署，不是去改一個設定值。 */}
+        <Suspense fallback={null}>
+          <ModelExpiryBanner />
         </Suspense>
         {children}
       </main>

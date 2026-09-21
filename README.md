@@ -55,6 +55,14 @@
 
 照 **[INSTALL.md](INSTALL.md)** 一節一節做，每一節都有確認步驟。
 
+第 1～8 節做完，閘道與儀表板就能用了。以下是選用元件，要用哪個再裝哪個：
+
+| 想要的功能 | 裝哪裡 |
+|---|---|
+| 讓自己的專案用你已付費的 Claude Code／Codex 訂閱 | INSTALL 第 9 節（訂閱橋接） |
+| 統計自己用掉的訂閱 token，算「省下多少」 | INSTALL 第 10 節（把 `collector/` 複製到那台電腦雙擊安裝） |
+| **專案看板**：一頁看完所有專案走到哪 | INSTALL 第 11 節＋ `helper/README.md`（看板讀各專案 repo 裡的 `doc/status.json`，要先裝小幫手把它推上來） |
+
 用 Claude Code 的話，可以讓它帶你裝：把 `skills/costscale-install` 資料夾複製到 `~/.claude/skills/`，然後對 Claude Code 說「幫我安裝 AI CostScale」。
 
 ## 目錄

@@ -186,6 +186,21 @@ async function readConfig(): Promise<{ entries: ConfigEntry[]; error: string | n
   return { entries: [], error: `找不到 litellm-config.yaml（試過 ${tried.join("、")}）` };
 }
 
+/**
+ * 只從 litellm-config.yaml 讀「有哪些部署、各自打到哪個後端模型」。
+ *
+ * 與 getKeyInventory 的差別：這支**不問閘道、不查資料庫**，所以可以放在
+ * 每頁都會跑的橫幅裡。萬用部署（gemini-*）不算具體型號，直接濾掉。
+ */
+export async function listConfigDeployments(): Promise<
+  { modelName: string; backendModel: string; envName: string | null }[]
+> {
+  const { entries } = await readConfig();
+  return entries
+    .filter((e) => !e.isWildcard && e.backendModel)
+    .map((e) => ({ modelName: e.modelName, backendModel: e.backendModel, envName: e.envName }));
+}
+
 // ── 閘道現場 ─────────────────────────────────────────────────────────
 
 type LiveDeployment = { modelName: string; backendModel: string; apiBase: string; id: string };

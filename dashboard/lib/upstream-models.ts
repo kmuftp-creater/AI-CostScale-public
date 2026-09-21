@@ -223,3 +223,79 @@ export function unusedModels(
   const used = new Set(deployments.map((d) => catalogId(d.backendModel)));
   return catalog.models.filter((m) => !used.has(m));
 }
+
+// ── 到期提醒（2026-09-21，User：「到期前 10 天通知就好」）────────────────
+
+/** 後端模型名前綴 → 抓取腳本裡的供應商代號。對不到就回 null，不猜。 */
+function providerOfBackend(backendModel: string): string | null {
+  const i = backendModel.indexOf("/");
+  if (i < 0) return null;
+  const head = backendModel.slice(0, i);
+  return (
+    {
+      vertex_ai: "vertex",
+      gemini: "gemini",
+      groq: "groq",
+      openrouter: "openrouter",
+      openai: "openai",
+      anthropic: "anthropic",
+      deepseek: "deepseek",
+      xai: "xai",
+    } as Record<string, string>
+  )[head] ?? null;
+}
+
+export type ExpiringModel = {
+  /** 閘道上的部署名，也就是專案送出去的那個名字。 */
+  modelName: string;
+  backendModel: string;
+  expires: string;
+  /** 誰宣告的。openrouter＝拿同名模型交叉參考來的，不是原廠公告。 */
+  expiresFrom: string;
+  /** 剩幾天。負數代表已經過期。 */
+  days: number;
+};
+
+/**
+ * 閘道實際在用、而且在 daysAhead 天內到期的模型。
+ *
+ * 為什麼只看「閘道在用的」：供應商下架一個我們從來沒呼叫過的模型，不是待辦事項。
+ * 會跳橫幅的東西一旦開始出現無關的內容，人就會開始無視它。
+ *
+ * 資料來源是主機端每 6 小時抓一次的 _models.json；抓不到就回空陣列，
+ * 不要讓一個輔助提醒把整個版面弄掛。
+ */
+export async function listExpiringGatewayModels(daysAhead = 10): Promise<ExpiringModel[]> {
+  try {
+    const { listConfigDeployments } = await import("@/lib/keys");
+    const [data, deployments] = await Promise.all([readUpstreamModels(), listConfigDeployments()]);
+    if (data.error) return [];
+
+    const seen = new Set<string>();
+    const out: ExpiringModel[] = [];
+    for (const d of deployments) {
+      if (seen.has(d.backendModel)) continue;
+      seen.add(d.backendModel);
+      const prov = providerOfBackend(d.backendModel);
+      if (!prov) continue;
+      const meta =
+        data.providers[prov]?.meta?.[catalogId(d.backendModel)] ??
+        data.providers[prov]?.meta?.[d.backendModel];
+      if (!meta?.expires) continue;
+      const t = Date.parse(meta.expires + "T00:00:00Z");
+      if (Number.isNaN(t)) continue;
+      const days = Math.ceil((t - Date.now()) / 86400000);
+      if (days > daysAhead) continue;
+      out.push({
+        modelName: d.modelName,
+        backendModel: d.backendModel,
+        expires: meta.expires,
+        expiresFrom: meta.expiresFrom,
+        days,
+      });
+    }
+    return out.sort((a, b) => a.days - b.days);
+  } catch {
+    return [];
+  }
+}
