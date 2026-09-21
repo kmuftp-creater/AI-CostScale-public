@@ -206,14 +206,22 @@ if ($codex.Found) {
 }
 Write-Host ''
 
+# Antigravity 兩種情形的結論是同一個：**收不到**。
+#
+# 2026-09-22 修：沒偵測到時原本放進 $skipped，而那個清單的結尾會說
+# 「以後用了再跑一次這個安裝就會自動接上」——**對 Antigravity 那是做不到的承諾**。
+# Codex 沒偵測到是「還沒裝，以後可以裝」；Antigravity 是「裝不了」。
+# 兩件事放進同一個清單再講同一句話，使用者會照著做然後發現沒用。
 if ($agy.Found) {
   Write-Host "[Antigravity] 找到 $($agy.Count) $($agy.Unit)，但收不到 token。" -ForegroundColor Yellow
   Write-Host '   它把對話存成 SQLite，token 數字在沒有欄位名的 protobuf 裡，'
   Write-Host '   本機沒有任何地方留下可讀的 token 數。'
   $cannot += 'Antigravity（本機沒有留 token 數字）'
 } else {
-  Write-Host '[Antigravity] 這台沒有用過，略過。' -ForegroundColor DarkGray
-  $skipped += 'Antigravity'
+  Write-Host '[Antigravity] 這台沒有用過。' -ForegroundColor DarkGray
+  Write-Host '   附帶一提：以後用了也收不到——它本機不留可讀的 token 數字，'
+  Write-Host '   再跑幾次這個安裝都一樣。'
+  $cannot += 'Antigravity（用了也收不到：本機沒有留 token 數字）'
 }
 
 # ── 總結 ─────────────────────────────────────────────────────────────
@@ -227,6 +235,10 @@ if ($cannot)    { Write-Host ('  收不到：' + ($cannot -join '、')) -Foregro
 Write-Host ''
 if ($skipped) {
   Write-Host '  以後在這台用了上面「略過」的那幾個，再跑一次這個安裝就會自動接上。'
+  Write-Host ''
+}
+if ($cannot) {
+  Write-Host '  「收不到」那幾個不是還沒裝——再跑幾次這個安裝也接不上，原因如上。' -ForegroundColor Yellow
   Write-Host ''
 }
 Write-Host '  紀錄檔在 %LOCALAPPDATA%，檔名 costscale-*-usage.log。'
