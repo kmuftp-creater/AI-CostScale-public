@@ -1657,6 +1657,22 @@ td.t-amt small {
   justify-content: center;
   padding: var(--space-lg);
   z-index: 50;
+  /* 【排版繼承的隔離，2026-09-21】
+     對話框是 position: fixed，**視覺上**獨立於它掛在 DOM 的哪裡——
+     但 CSS 繼承不看視覺，它照樣從 DOM 祖先拿值。
+
+     實測：金鑰頁的「換掉／單價」按鈕在 td.t-act 底下，而那個 td 是
+     white-space: nowrap（給單顆按鈕用的）＋ text-align: right。
+     對話框開在那裡，整段說明就變成一條不換行的長線，
+     量出來卡片內容寬 1478px 而卡片只有 460px，溢出 1020px，
+     文字直接衝出卡片外——User 2026-09-21 回報的「排版出問題」。
+
+     2026-09-09 的移除金鑰確認句踩過同一個坑，當時是在 .key-remove 局部解掉。
+     那是治標：下一個放進 td 裡的元件會再中一次（這次就是）。
+     所以改在這裡一次解決——任何對話框掛在哪都不受父層排版影響。 */
+  white-space: normal;
+  text-align: left;
+  word-break: normal;
 }
 .dialog-card {
   width: 100%;
@@ -2178,7 +2194,12 @@ td.t-act button {
   gap: 4px 14px; margin: 10px 0 6px; max-height: 260px; overflow-y: auto;
   padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
 }
-.model-opt { display: flex; align-items: center; gap: 7px; font-size: 0.84rem; cursor: pointer; }
+/* flex-wrap 不能省（2026-09-21）：這一列除了勾選框與模型名，後面還接能力標籤、
+   預覽版、停用日，窄一點就會擠成一條。允許換行，讓它往下長而不是往外衝。 */
+.model-opt {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 4px 7px; font-size: 0.84rem; cursor: pointer;
+}
 .model-opt code { font-size: 0.8rem; }
 .model-default { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; font-size: 0.86rem; }
 .model-default select { padding: 5px 8px; min-width: 210px; }
