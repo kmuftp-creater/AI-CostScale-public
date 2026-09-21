@@ -241,16 +241,34 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
                           )}
                         </td>
                         <td className="microlabel">
-                          {/* 沒有自訂單價時不寫「內建」兩個字就好——那是正常情況，
-                              不需要每一列都佔一行字。有自訂的才要看得出來。 */}
-                          {price.get(c.modelName)?.inputPerMTok != null ? (
-                            <>
-                              自訂 {price.get(c.modelName)?.inputPerMTok}／
-                              {price.get(c.modelName)?.outputPerMTok}
-                            </>
-                          ) : (
-                            <span style={{ color: "var(--muted)" }}>內建價目</span>
-                          )}
+                          {/* 顯示「閘道實際會用的單價」，不是只說有沒有自訂（2026-09-21）。
+                              User：「不填價格，他也會自動計算嗎？因為你一片空白，
+                              我也沒看到現在模型的價格顯示在哪裡」——會自動算，
+                              但**算不算得出來**這件事本來完全看不到。
+                              0／0 代表 LiteLLM 不認得這支模型，花費會被記成 0，那要標紅。 */}
+                          {(() => {
+                            const d = price.get(c.modelName);
+                            if (!d) return <span style={{ color: "var(--muted)" }}>—</span>;
+                            const custom = d.inputPerMTok != null;
+                            const ei = d.effInputPerMTok;
+                            const eo = d.effOutputPerMTok;
+                            if (ei == null) return <span style={{ color: "var(--muted)" }}>問不到閘道</span>;
+                            if (ei === 0 && eo === 0) {
+                              return d.pricing === "subscription" ? (
+                                <span style={{ color: "var(--muted)" }}>訂閱，不按 token</span>
+                              ) : (
+                                <strong className="k-gone">0／0 花費會記成 0</strong>
+                              );
+                            }
+                            return (
+                              <>
+                                {ei}／{eo}
+                                <span style={{ color: "var(--muted)" }}>
+                                  {custom ? " 自訂" : " 內建"}
+                                </span>
+                              </>
+                            );
+                          })()}
                         </td>
                         <td className="t-act">
                           {c.present === null ? null : (
@@ -264,6 +282,9 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
                                 modelName={c.modelName}
                                 inputPerMTok={price.get(c.modelName)?.inputPerMTok ?? null}
                                 outputPerMTok={price.get(c.modelName)?.outputPerMTok ?? null}
+                                effInputPerMTok={price.get(c.modelName)?.effInputPerMTok ?? null}
+                                effOutputPerMTok={price.get(c.modelName)?.effOutputPerMTok ?? null}
+                                subscription={price.get(c.modelName)?.pricing === "subscription"}
                               />
                             </>
                           )}

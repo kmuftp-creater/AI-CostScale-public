@@ -65,6 +65,14 @@ export type KeyDeployment = {
    */
   inputPerMTok: number | null;
   outputPerMTok: number | null;
+  /**
+   * 閘道**實際會用**的單價（每百萬），也就是「自訂有就用自訂、沒有就用內建」的結果。
+   * null＝問不到閘道。0／0＝LiteLLM 不認得這支模型，花費會被記成 0。
+   */
+  effInputPerMTok: number | null;
+  effOutputPerMTok: number | null;
+  /** 計價型態。訂閱通道本來就不按 token 計費，單價 0 是正常的，不該標成警告。 */
+  pricing: PricingType;
 };
 
 export type DeploymentUsage = {
@@ -219,7 +227,22 @@ export async function listConfigDeployments(): Promise<
 
 // ── 閘道現場 ─────────────────────────────────────────────────────────
 
-type LiveDeployment = { modelName: string; backendModel: string; apiBase: string; id: string };
+type LiveDeployment = {
+  modelName: string;
+  backendModel: string;
+  apiBase: string;
+  id: string;
+  /**
+   * 閘道**實際會用**的單價（每百萬 token 美元）。
+   *
+   * 這是 LiteLLM 解析後的結果：設定檔有自訂就是自訂的，沒有就是它內建價目表查到的。
+   * 兩者都沒有時是 0——而 0 代表「這支模型的花費會被記成 0」，那是最危險的狀態，
+   * 因為畫面看起來完全正常（User 2026-09-21：「不填價格，他也會自動計算嗎？
+   * 因為你一片空白，我也沒看到現在模型的價格顯示在哪裡」）。
+   */
+  effInputPerMTok: number;
+  effOutputPerMTok: number;
+};
 
 async function readGateway(): Promise<{ live: LiveDeployment[]; error: string | null }> {
   const key = process.env.LITELLM_MASTER_KEY || "";
@@ -240,11 +263,18 @@ async function readGateway(): Promise<{ live: LiveDeployment[]; error: string | 
       const info = (o.model_info ?? {}) as Record<string, unknown>;
       const id = typeof info.id === "string" ? info.id : "";
       if (!id) continue;
+      // 閘道回的是「每 token」，人看的是「每百萬」，在這裡換算一次。
+      const perM = (v: unknown): number => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n * 1_000_000 : 0;
+      };
       live.push({
         modelName: typeof o.model_name === "string" ? o.model_name : "",
         backendModel: typeof params.model === "string" ? params.model : "",
         apiBase: typeof params.api_base === "string" ? params.api_base : "",
         id,
+        effInputPerMTok: perM(info.input_cost_per_token),
+        effOutputPerMTok: perM(info.output_cost_per_token),
       });
     }
     return { live, error: null };
@@ -389,16 +419,24 @@ export async function getKeyInventory(): Promise<KeyInventory> {
       { rows: [], pricing: e.pricing, provider, kind, ids: new Set<string>() };
     if (e.isWildcard) {
       const ids = wildcardIds.get(idx) ?? [];
+      const lv = ids[0] ? live.find((d) => d.id === ids[0]) : undefined;
       cur.rows.push({
         modelName: e.modelName, backendModel: e.backendModel, deploymentId: ids[0] ?? null,
         inputPerMTok: e.inputPerMTok, outputPerMTok: e.outputPerMTok,
+        effInputPerMTok: lv?.effInputPerMTok ?? null,
+        effOutputPerMTok: lv?.effOutputPerMTok ?? null,
+        pricing: e.pricing,
       });
       ids.forEach((id) => cur.ids.add(id));
       if (ids.length === 0) unloaded += 1;
     } else {
+      const lv2 = r.id ? live.find((d) => d.id === r.id) : undefined;
       cur.rows.push({
         modelName: e.modelName, backendModel: e.backendModel, deploymentId: r.id,
         inputPerMTok: e.inputPerMTok, outputPerMTok: e.outputPerMTok,
+        effInputPerMTok: lv2?.effInputPerMTok ?? null,
+        effOutputPerMTok: lv2?.effOutputPerMTok ?? null,
+        pricing: e.pricing,
       });
       if (r.id) cur.ids.add(r.id);
       else unloaded += 1;
@@ -462,6 +500,8 @@ export async function getKeyInventory(): Promise<KeyInventory> {
       vertexModels.push({
         modelName: d.modelName, backendModel: d.backendModel, deploymentId: d.id,
         inputPerMTok: ce?.inputPerMTok ?? null, outputPerMTok: ce?.outputPerMTok ?? null,
+        effInputPerMTok: d.effInputPerMTok, effOutputPerMTok: d.effOutputPerMTok,
+        pricing: ce?.pricing ?? "payg",
       });
     }
   }

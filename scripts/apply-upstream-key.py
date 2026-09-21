@@ -812,9 +812,15 @@ def process(req_path):
     try:
         with open(req_path, encoding="utf-8") as f:
             req = json.load(f)
+    except FileNotFoundError:
+        # 別人先取走了（或被人工清掉）。這不是錯誤，也不該留下一筆看起來很嚇人的失敗紀錄。
+        return
     except Exception as e:
         write_status(req_id, "failed", "請求檔讀不到或不是合法 JSON：%s" % e)
-        os.remove(req_path)
+        try:
+            os.remove(req_path)
+        except FileNotFoundError:
+            pass
         return
 
     # 設單價走另一條路：它不碰 .env，只改設定檔的 model_info。
@@ -969,18 +975,72 @@ def process(req_path):
             pass
 
 
+LOCK_PATH = os.path.join(ROOT, "spool", "apply-upstream-key.lock")
+
+
+def acquire_lock():
+    """同一時間只准一個實例在跑。拿不到就回 None，呼叫端直接結束。
+
+    **這不是保險，是必要條件**（2026-09-21 踩到，代價是一次靜默的回滾）：
+
+    cron 每 60 秒跑一次，而一次套用要 50～80 秒（大半在等閘道重啟），
+    所以兩個實例重疊是常態不是例外。重疊的後果不是「慢一點」而是**改動被吃掉**：
+    每次套用前會備份設定檔、失敗時還原。A 實例套用成功把檔案改成新的，
+    B 實例手上拿的是 A 動手前的備份，B 因為別的原因失敗就把整個檔案還原回去——
+    A 的成功被默默抹掉，而狀態檔上兩筆都寫著各自的結果，看起來都「正常」。
+
+    實際症狀：畫面說「gemini-flash-free 本來就已經指向 3.8-flash」，
+    設定檔裡卻是 2.5-flash。兩句話都是真的，只是中間隔了一次回滾。
+
+    用 O_EXCL 建檔當鎖：這個動作在檔案系統層是原子的，不需要額外套件。
+    鎖裡寫 pid 與時間，卡住時看得出是誰。超過 20 分鐘的鎖視為殘留（行程被 kill 了）。
+    """
+    stale_after = 20 * 60
+    try:
+        if os.path.exists(LOCK_PATH) and time.time() - os.path.getmtime(LOCK_PATH) > stale_after:
+            log("發現殘留的鎖（超過 %d 分鐘），接手" % (stale_after // 60))
+            os.remove(LOCK_PATH)
+    except Exception:
+        pass
+    try:
+        fd = os.open(LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        return None
+    os.write(fd, ("pid=%d at=%s\n" % (os.getpid(), datetime.now().isoformat())).encode())
+    os.close(fd)
+    return LOCK_PATH
+
+
+def release_lock():
+    try:
+        os.remove(LOCK_PATH)
+    except Exception:
+        pass
+
+
 def main():
     if not os.path.isdir(SPOOL):
         return
-    # 底線開頭的是給儀表板讀的資料檔（_tails.json），不是請求。
-    pend = sorted(p for p in os.listdir(SPOOL)
-                  if p.endswith(".json")
-                  and not p.endswith(".status.json")
-                  and not p.startswith("_"))
-    for name in pend:
-        process(os.path.join(SPOOL, name))
-    # 每輪都刷新尾碼表，這樣手動改過 .env 之後儀表板也跟得上。
-    write_tails()
+    if acquire_lock() is None:
+        # 安靜地退場。上一輪還在跑，下一分鐘的 cron 會接手，沒有東西會遺失。
+        return
+    try:
+        # 底線開頭的是給儀表板讀的資料檔（_tails.json），不是請求。
+        pend = sorted(p for p in os.listdir(SPOOL)
+                      if p.endswith(".json")
+                      and not p.endswith(".status.json")
+                      and not p.startswith("_"))
+        for name in pend:
+            p = os.path.join(SPOOL, name)
+            # 檔案可能在列表之後被清掉（例如人工介入）。不存在就跳過，
+            # 不要讓整輪因為一個不見的檔案而中斷——後面還在排隊的會一起被卡住。
+            if not os.path.exists(p):
+                continue
+            process(p)
+        # 每輪都刷新尾碼表，這樣手動改過 .env 之後儀表板也跟得上。
+        write_tails()
+    finally:
+        release_lock()
 
 
 if __name__ == "__main__":

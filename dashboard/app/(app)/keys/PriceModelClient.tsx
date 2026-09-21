@@ -6,16 +6,18 @@ import { useRouter } from "next/navigation";
 /**
  * 替某個部署填自訂單價（2026-09-21）。
  *
- * User：「C6 沒看到可以填價格的地方」。
+ * User 一開始問的是「C6 沒看到可以填價格的地方」，看到對話框之後又問了更關鍵的一句：
+ * 「不填價格，他也會自動計算嗎？因為你一片空白，我也沒看到現在模型的價格顯示在哪裡」。
  *
- * 為什麼需要：花費是閘道記的，它拿後端模型名去查 LiteLLM 內建的價目表。
- * 那份表涵蓋多數公開模型，但**自架模型與剛出的型號沒有**——那時這個部署的花費會記成 0。
- * 對一個賣點是「看得到花多少錢」的東西，記 0 比記錯更糟，因為畫面看起來一切正常。
+ * 會自動算——閘道拿後端模型名去查 LiteLLM 內建的價目表。問題是**算不算得出來**
+ * 這件事原本完全看不到：查得到就正常計費，查不到就記成 0，而畫面長得一模一樣。
+ * 所以這個對話框現在一定會先講「現在實際用的是多少」，那個數字是跟閘道問來的，
+ * 不是我們猜的。
  *
  * 兩個刻意的設計：
  *
  * 1. **填的是「每百萬 token 多少美元」**，因為所有供應商的價目表都用這個單位。
- *    LiteLLM 存的是每 token，換算在主機端做，不要求人自己除以一百萬。
+ *    LiteLLM 存的是每 token，換算在主機端做。
  * 2. **輸入與輸出要嘛都填、要嘛都清掉。** 只填一邊會讓另一邊悄悄用內建價目，
  *    兩者混用算出來的數字沒有意義。
  */
@@ -23,20 +25,36 @@ export default function PriceModelClient({
   modelName,
   inputPerMTok,
   outputPerMTok,
+  effInputPerMTok,
+  effOutputPerMTok,
+  subscription,
 }: {
   modelName: string;
+  /** 設定檔裡自訂的。null＝沒自訂。 */
   inputPerMTok: number | null;
   outputPerMTok: number | null;
+  /** 閘道實際會用的（自訂有就是自訂、沒有就是內建）。null＝問不到閘道。 */
+  effInputPerMTok: number | null;
+  effOutputPerMTok: number | null;
+  /** 訂閱通道不按 token 計費，0 是正常的，不該當成警告。 */
+  subscription: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [inp, setInp] = useState(inputPerMTok == null ? "" : String(inputPerMTok));
-  const [outp, setOutp] = useState(outputPerMTok == null ? "" : String(outputPerMTok));
+  // 預設帶入「現在實際用的價」，不是空白。要微調的人有起點，要照抄的人也看得到基準。
+  const [inp, setInp] = useState(
+    inputPerMTok != null ? String(inputPerMTok) : effInputPerMTok ? String(effInputPerMTok) : ""
+  );
+  const [outp, setOutp] = useState(
+    outputPerMTok != null ? String(outputPerMTok) : effOutputPerMTok ? String(effOutputPerMTok) : ""
+  );
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const custom = inputPerMTok != null;
+  const unknownPrice =
+    !custom && !subscription && effInputPerMTok === 0 && effOutputPerMTok === 0;
 
   async function send(clear: boolean) {
     setBusy(true);
@@ -81,17 +99,28 @@ export default function PriceModelClient({
     <div className="dialog-overlay" role="dialog" aria-modal="true">
       <div className="dialog-card">
         <div className="dialog-title">「{modelName}」的單價</div>
+
+        {/* 第一句話一定是「現在實際是多少」。沒有這一句，人不知道要不要動它。 */}
         <div className="ledger-note">
-          {custom ? (
+          {effInputPerMTok == null ? (
+            <>現在的單價<strong>問不到閘道</strong>，下面填的值會直接寫進設定檔。</>
+          ) : subscription ? (
             <>
-              目前用的是<strong>自訂單價</strong>：每百萬 token 輸入 {inputPerMTok}、輸出{" "}
-              {outputPerMTok} 美元。
+              這是<strong>訂閱通道</strong>，不按 token 計費，單價 0 是正常的。
+              除非你要估算「如果走 API 要多少錢」，否則不用填。
+            </>
+          ) : unknownPrice ? (
+            <>
+              <strong className="k-gone">LiteLLM 的內建價目表裡沒有這一支</strong>，
+              所以它的花費<strong>現在被記成 0</strong>——畫面看起來正常，但數字是假的。
+              自架模型與剛出的型號都會這樣。請填上單價。
             </>
           ) : (
             <>
-              目前用的是 <strong>LiteLLM 內建價目</strong>。公開模型多半查得到，
-              <strong>自架模型與剛出的型號查不到，那時花費會記成 0</strong>——
-              畫面看起來正常，但數字是假的。
+              現在實際用的是：每百萬 token 輸入 <strong>{effInputPerMTok}</strong>、輸出{" "}
+              <strong>{effOutputPerMTok}</strong> 美元
+              {custom ? "（你自己填的）" : "（LiteLLM 內建價目，自動查到的）"}。
+              {custom ? "" : "不用動它也會正常計費；只有在內建價目不對或查不到時才需要填。"}
             </>
           )}
         </div>
@@ -119,7 +148,8 @@ export default function PriceModelClient({
 
         <div className="ledger-note">
           兩欄要一起填。只填一邊的話另一邊會悄悄用內建價目，混著算出來的數字沒有意義。
-          填完套用時<strong>閘道會重啟數秒</strong>，失敗會自動回滾。
+          <strong>存進去之後就固定了</strong>——之後供應商調價，LiteLLM 更新內建價目也不會影響這裡，
+          要跟著調就回來改或清除。套用時<strong>閘道會重啟數秒</strong>，失敗會自動回滾。
         </div>
         {err ? <div className="dialog-warn">{err}</div> : null}
         <div className="dialog-actions">
