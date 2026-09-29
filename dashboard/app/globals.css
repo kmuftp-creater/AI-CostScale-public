@@ -750,6 +750,13 @@ td.t-name small {
   font-family: var(--font-mono);
   margin-top: 2px;
 }
+/* 軟體的描述（新增時填的那欄）。用內文字體而不是等寬，跟下面兩行機器資訊分開讀。 */
+td.t-name small.app-desc {
+  font-family: inherit;
+  font-size: 0.8rem;
+  color: var(--ink);
+  opacity: 0.8;
+}
 td.t-kind {
   font-family: var(--font-mono);
   font-size: 0.72rem;

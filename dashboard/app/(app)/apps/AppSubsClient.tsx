@@ -237,7 +237,8 @@ export default function AppSubsClient({ initial }: { initial: AppSub[] }) {
                               "又是另一組字串，例如 myapp 對應的是 myapp_main。\n" +
                               "改過名的專案會有多個歷史標籤——舊版程式送出的標籤" +
                               "會一直留在歷史帳單裡，不會被追溯改寫，所以要全部列出才算得齊。" +
-                              "例如 app-a 有 app-a 與 app-a-old 兩個。",
+                              "例如 app-a 有 app-a 與 app-a-old 兩個。\n" +
+                              "填之前先查帳單：兩個標籤在同一段時間都有花費，就是兩套軟體，不是改名。",
                             (app.billing_client_ids ?? []).join(","),
                           );
                           if (v !== null) save(app.id, { billingClientIds: v });

@@ -423,6 +423,8 @@ export default function AppsClient({
                     <tr key={app.id}>
                       <td className="t-name">
                         {app.name}
+                        {/* 描述新增時就有收、也有存，但 2026-09-30 之前清單從沒畫出來。 */}
+                        {app.description?.trim() ? <small className="app-desc">{app.description}</small> : null}
                         <small>金鑰末四碼 ****{last4(app.vkey_id)}</small>
                         <LimitLine lim={limits[app.id]} fx={fx} />
                       </td>
@@ -507,6 +509,7 @@ export default function AppsClient({
                       <tr key={app.id}>
                         <td className="t-name">
                           {app.name}
+                          {app.description?.trim() ? <small className="app-desc">{app.description}</small> : null}
                           <small>金鑰已撤銷 · 末四碼 ****{last4(app.vkey_id)}</small>
                         </td>
                         <td className="t-kind">
