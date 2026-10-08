@@ -36,6 +36,9 @@
   --shadow-panel: 0 1px 0 oklch(0% 0 0 / 0.3);
   --g-btn-bg: oklch(96% 0.005 80);
   --g-btn-ink: oklch(25% 0.01 80);
+  /* 使用說明的標題層級（2026-10-08）：大標用主色、小標換一個色相，掃一眼就分得出層次 */
+  --h-major: oklch(80% 0.135 78);
+  --h-minor: oklch(78% 0.1 175);
 }
 :root[data-theme="light"] {
   --paper: oklch(97.2% 0.004 245);
@@ -67,6 +70,9 @@
   --shadow-panel: 0 1px 3px oklch(50% 0.02 250 / 0.1), 0 4px 14px oklch(50% 0.02 250 / 0.07);
   --g-btn-bg: oklch(99.7% 0.001 245);
   --g-btn-ink: oklch(32% 0.006 250);
+  /* 白底上 --accent（65.6%）當字太淺，標題另外壓深，對比才夠 */
+  --h-major: oklch(50% 0.14 252);
+  --h-minor: oklch(48% 0.09 175);
 }
 :root {
   --font-display: var(--font-space-grotesk), var(--font-noto-sans-tc), "Microsoft JhengHei", sans-serif;
@@ -309,12 +315,14 @@ header {
 .prose h2 {
   font-family: var(--font-display);
   font-size: 1.2rem;
+  color: var(--h-major);
   margin: var(--space-lg) 0 var(--space-2xs);
   padding-top: var(--space-sm);
   border-top: 1px solid var(--rule-soft);
 }
 .prose h3 {
   font-size: 1rem;
+  color: var(--h-minor);
   margin: var(--space-md) 0 var(--space-2xs);
 }
 .prose p {
@@ -327,6 +335,11 @@ header {
 }
 .prose li {
   margin-bottom: 0.35rem;
+}
+/* 步驟編號跟大標同色：「第幾步」要一眼找得到 */
+.prose ol > li::marker {
+  color: var(--h-major);
+  font-weight: 700;
 }
 .prose strong {
   color: var(--ink);
