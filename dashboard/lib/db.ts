@@ -1852,11 +1852,22 @@ export async function deleteBudget(id: number): Promise<boolean> {
  * 必須與儀表板上顯示的數字同源，否則兩處對不起來時無從查起。
  */
 /**
+ * Cloud Monitoring 與 Vertex 帳單對帳時用的那個專案（scripts/fetch-gcp-usage.py 的 GCP_PROJECT）。
+ *
+ * 閘道的 Vertex 可以改打另一個專案（例如換一個還有贈金的帳號付費），那時「閘道打的 Vertex」就不在這個專案裡。
+ * 跟這個專案的監控量或帳單相減時，閘道那一側也只能算打到這個專案的呼叫——
+ * 否則打到新專案的金額會被從舊專案扣掉，直連被算成 0 而且不會有任何錯誤訊息。
+ */
+const MONITORED_VERTEX_PROJECT = process.env.GCP_PROJECT || "your-gcp-project";
+const MONITORED_VERTEX_API_BASE = `%/projects/${MONITORED_VERTEX_PROJECT}/%`;
+
+/**
  * 閘道自己打掉的 Vertex 花費（LiteLLM 牌價，USD）。
  *
  * 用途是把它從 gcp_usage 的專案總量裡扣掉，才得到真正的「直連」。
  * 2026-08-25 之前預算把兩者直接相加，經閘道的 Vertex 被算了兩次。
  */
+
 async function gatewayVertexSpend(from: Date, to: Date): Promise<number> {
   try {
     const client = getPool();
@@ -1864,8 +1875,9 @@ async function gatewayVertexSpend(from: Date, to: Date): Promise<number> {
       `SELECT COALESCE(SUM(spend), 0)::float8 AS usd
          FROM "LiteLLM_SpendLogs"
         WHERE custom_llm_provider = 'vertex_ai'
+          AND api_base LIKE $3
           AND "startTime" >= $1 AND "startTime" < $2`,
-      [from.toISOString(), to.toISOString()]
+      [from.toISOString(), to.toISOString(), MONITORED_VERTEX_API_BASE]
     );
     return Number(rows[0]?.usd) || 0;
   } catch (err) {
@@ -2046,7 +2058,8 @@ export async function getUsageExportRows(from: Date, to: Date): Promise<UsageExp
         day: r.day,
         source: "Vertex 用量",
         // GCP 監控只到模型層級，分不出哪個軟體。留空會被誤讀成漏資料，寫明原因。
-        app: "(專案總量，含經閘道，未分軟體)",
+        // 閘道的 vertex_project 跟監控的是同一個專案時才含閘道；換專案付費之後就不含。
+        app: "(監控專案的總量，未分軟體)",
         model: r.model,
         calls: Number(r.calls),
         input_tokens: Number(r.input_tokens),
@@ -3728,10 +3741,11 @@ export async function getVertexReconciliation(
                 COALESCE(SUM(total_tokens), 0)::bigint  AS tokens
            FROM "LiteLLM_SpendLogs"
           WHERE custom_llm_provider = 'vertex_ai'
+            AND api_base LIKE $3
             -- startTime 是 UTC；日期是台北日，所以日界線往前推 8 小時
             AND "startTime" >= ($1::date - interval '8 hours')
             AND "startTime" < ($2::date + 1 - interval '8 hours')`,
-        [fromDay, windowTo]
+        [fromDay, windowTo, MONITORED_VERTEX_API_BASE]
       ),
       client.query(
         `SELECT COALESCE(SUM(tokens), 0)::bigint AS tokens
@@ -3748,6 +3762,7 @@ export async function getVertexReconciliation(
                   SUM(total_tokens)::bigint      AS tokens
              FROM "LiteLLM_SpendLogs"
             WHERE custom_llm_provider = 'vertex_ai'
+              AND api_base LIKE $4
               AND "startTime" >= $1::date AND "startTime" < ($2::date + 1)
             GROUP BY 1
            HAVING SUM(spend) > 0
@@ -3773,7 +3788,7 @@ export async function getVertexReconciliation(
            FROM gw
            JOIN ul  ON ul.d  = gw.d
            LEFT JOIN mon ON mon.d = gw.d`,
-        [fromDay, windowTo, BILLING_UNLABELED]
+        [fromDay, windowTo, BILLING_UNLABELED, MONITORED_VERTEX_API_BASE]
       ),
     ]);
 
@@ -3948,5 +3963,207 @@ export async function spendOfKeysSince(vkeys: string[], since: Date): Promise<nu
   } catch (err) {
     console.warn("[db] spendOfKeysSince failed:", err instanceof Error ? err.message : err);
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GCP 贈金餘額（2026-10-08，db/init/34）
+//
+// 帳單匯出只有「每天被抵掉多少」，沒有「還剩多少」，所以用控制台讀到的餘額當錨點往下扣。
+// 預估值只會比實際低（沒補記的新贈金不算進來），警示寧可早到不可晚到。
+// ---------------------------------------------------------------------------
+
+export type CreditPoolLevel = "ok" | "low" | "empty" | "unknown";
+
+export type CreditPoolStatus = {
+  id: number;
+  label: string;
+  billingSource: string;
+  consoleUrl: string | null;
+  anchorBalanceTwd: number;
+  anchorDay: string;
+  warnBelowTwd: number;
+  enabled: boolean;
+  alertedAt: string | null;
+  alertError: string | null;
+  note: string | null;
+  grants: Array<{ id: number; grantedOn: string; amountTwd: number; note: string | null }>;
+  grantsTwd: number;
+  /** 錨點日起被抵掉的金額（正數）。查詢失敗是 null，**不能當 0**——0 會被讀成「餘額沒動」。 */
+  usedTwd: number | null;
+  estimateTwd: number | null;
+  /** 最近 7 天平均每天被抵掉多少，用來估還能撐幾天。 */
+  dailyBurnTwd: number | null;
+  daysLeft: number | null;
+  /** 帳單資料只到哪一天。預估值是「截至這天」的，不是此刻的。 */
+  dataThrough: string | null;
+  level: CreditPoolLevel;
+};
+
+function creditLevel(estimate: number | null, warn: number): CreditPoolLevel {
+  if (estimate === null) return "unknown";
+  if (estimate <= 0) return "empty";
+  if (estimate <= warn) return "low";
+  return "ok";
+}
+
+export async function evaluateCreditPools(): Promise<CreditPoolStatus[]> {
+  try {
+    const client = getPool();
+    const pools = await client.query(
+      `SELECT id, label, billing_source, console_url, anchor_balance_twd::float8 anchor,
+              to_char(anchor_day, 'YYYY-MM-DD') anchor_day, warn_below_twd::float8 warn,
+              enabled, alerted_at, alert_error, note
+         FROM costscale.credit_pools ORDER BY id`
+    );
+    const out: CreditPoolStatus[] = [];
+    for (const p of pools.rows) {
+      const [grants, used, burn, state] = await Promise.all([
+        client.query(
+          `SELECT id, to_char(granted_on, 'YYYY-MM-DD') d, amount_twd::float8 a, note
+             FROM costscale.credit_pool_grants WHERE pool_id = $1 ORDER BY granted_on, id`,
+          [p.id]
+        ),
+        // credit 在匯出裡是負數。只認台幣列：錨點餘額是台幣，混進別的幣別會靜默算錯。
+        client.query(
+          `SELECT COALESCE(-SUM(credit), 0)::float8 used,
+                  COUNT(*) FILTER (WHERE currency <> 'TWD')::int other_ccy
+             FROM costscale.billing_daily
+            WHERE source = $1 AND day >= $2::date`,
+          [p.billing_source, p.anchor_day]
+        ),
+        client.query(
+          `SELECT COALESCE(-SUM(credit), 0)::float8 used, COUNT(DISTINCT day)::int days
+             FROM costscale.billing_daily
+            WHERE source = $1 AND currency = 'TWD' AND day >= $2::date
+              AND day > (SELECT max_usage_day FROM costscale.billing_export_state WHERE source = $1) - 7`,
+          [p.billing_source, p.anchor_day]
+        ),
+        client.query(
+          `SELECT to_char(max_usage_day, 'YYYY-MM-DD') d FROM costscale.billing_export_state WHERE source = $1`,
+          [p.billing_source]
+        ),
+      ]);
+      const grantRows = grants.rows
+        .filter((g) => g.d >= p.anchor_day)
+        .map((g) => ({ id: g.id, grantedOn: g.d, amountTwd: Number(g.a), note: g.note }));
+      const grantsTwd = grantRows.reduce((s, g) => s + g.amountTwd, 0);
+      const otherCcy = Number(used.rows[0]?.other_ccy ?? 0);
+      const usedTwd = otherCcy > 0 ? null : Number(used.rows[0]?.used ?? 0);
+      const estimate = usedTwd === null ? null : Number(p.anchor) + grantsTwd - usedTwd;
+      // 只取錨點日之後、最近 7 天內有資料的日子，用「實際天數」除——
+      // 錨點才剛設的那幾天若硬除以 7，平均會被低估、剩餘天數被高估。
+      const burnDays = Number(burn.rows[0]?.days ?? 0);
+      const dailyBurn = burnDays > 0 ? Number(burn.rows[0].used) / burnDays : null;
+      out.push({
+        id: p.id,
+        label: p.label,
+        billingSource: p.billing_source,
+        consoleUrl: p.console_url,
+        anchorBalanceTwd: Number(p.anchor),
+        anchorDay: p.anchor_day,
+        warnBelowTwd: Number(p.warn),
+        enabled: p.enabled,
+        alertedAt: p.alerted_at ? new Date(p.alerted_at).toISOString() : null,
+        alertError: p.alert_error,
+        note: p.note,
+        grants: grantRows,
+        grantsTwd,
+        usedTwd,
+        estimateTwd: estimate,
+        dailyBurnTwd: dailyBurn,
+        daysLeft:
+          estimate !== null && dailyBurn && dailyBurn > 0
+            ? Math.max(0, Math.floor((estimate - Number(p.warn)) / dailyBurn))
+            : null,
+        dataThrough: state.rows[0]?.d ?? null,
+        level: creditLevel(estimate, Number(p.warn)),
+      });
+    }
+    return out;
+  } catch (err) {
+    console.warn("[db] evaluateCreditPools failed:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/** 校正：照控制台讀到的餘額重設錨點。錨點日＝今天（台北），清掉已寄過的警示。 */
+export async function calibrateCreditPool(
+  id: number,
+  balanceTwd: number,
+  warnBelowTwd?: number
+): Promise<boolean> {
+  try {
+    const result = await getPool().query(
+      `UPDATE costscale.credit_pools
+          SET anchor_balance_twd = $2, anchor_day = $3::date,
+              warn_below_twd = COALESCE($4, warn_below_twd),
+              alerted_at = NULL, alert_error = NULL, updated_at = now()
+        WHERE id = $1`,
+      [id, balanceTwd, taipeiDay(new Date()), warnBelowTwd ?? null]
+    );
+    return (result.rowCount ?? 0) > 0;
+  } catch (err) {
+    console.warn("[db] calibrateCreditPool failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
+export async function setCreditPoolWarn(id: number, warnBelowTwd: number): Promise<boolean> {
+  try {
+    const result = await getPool().query(
+      `UPDATE costscale.credit_pools
+          SET warn_below_twd = $2, alerted_at = NULL, alert_error = NULL, updated_at = now()
+        WHERE id = $1`,
+      [id, warnBelowTwd]
+    );
+    return (result.rowCount ?? 0) > 0;
+  } catch (err) {
+    console.warn("[db] setCreditPoolWarn failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
+/** 補記一筆新發的贈金。餘額變多了，已寄過的警示要清掉，跌破時才會再通知。 */
+export async function addCreditGrant(
+  poolId: number,
+  grantedOn: string,
+  amountTwd: number,
+  note?: string
+): Promise<boolean> {
+  // 交易要在同一條連線上：直接對 Pool 下 BEGIN／COMMIT，每句可能落在不同連線。
+  let client: import("pg").PoolClient | null = null;
+  try {
+    client = await getPool().connect();
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO costscale.credit_pool_grants (pool_id, granted_on, amount_twd, note)
+       VALUES ($1, $2::date, $3, $4)`,
+      [poolId, grantedOn, amountTwd, note ?? null]
+    );
+    await client.query(
+      `UPDATE costscale.credit_pools SET alerted_at = NULL, alert_error = NULL, updated_at = now()
+        WHERE id = $1`,
+      [poolId]
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (err) {
+    await client?.query("ROLLBACK").catch(() => {});
+    console.warn("[db] addCreditGrant failed:", err instanceof Error ? err.message : err);
+    return false;
+  } finally {
+    client?.release();
+  }
+}
+
+export async function markCreditPoolAlerted(id: number, error?: string): Promise<void> {
+  try {
+    await getPool().query(
+      `UPDATE costscale.credit_pools SET alerted_at = now(), alert_error = $2 WHERE id = $1`,
+      [id, error ?? null]
+    );
+  } catch (err) {
+    console.warn("[db] markCreditPoolAlerted failed:", err instanceof Error ? err.message : err);
   }
 }

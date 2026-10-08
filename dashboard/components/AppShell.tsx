@@ -8,6 +8,7 @@ import DateRangeSeg from "./DateRangeSeg";
 import BudgetBanner from "./BudgetBanner";
 import ReminderBanner from "./ReminderBanner";
 import ModelExpiryBanner from "./ModelExpiryBanner";
+import CreditBanner from "./CreditBanner";
 
 async function doSignOut() {
   "use server";
@@ -77,6 +78,10 @@ export default function AppShell({
             跟前兩者不同：要換模型、重測、重部署，不是去改一個設定值。 */}
         <Suspense fallback={null}>
           <ModelExpiryBanner />
+        </Suspense>
+        {/* GCP 贈金快用完（2026-10-08）。處理方式是換帳號，跟上面三種都不同。 */}
+        <Suspense fallback={null}>
+          <CreditBanner />
         </Suspense>
         {children}
       </main>

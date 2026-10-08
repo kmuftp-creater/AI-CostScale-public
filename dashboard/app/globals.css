@@ -2048,7 +2048,9 @@ td.t-act {
   white-space: nowrap;
   padding-left: 0.75rem;
 }
-td.t-act button {
+/* 連結做成按鈕外觀的也要一起縮（2026-10-08，贈金面板的「控制台」比旁邊大一號） */
+td.t-act button,
+td.t-act a.btn-ghost {
   margin-left: 0.35rem;
   font-size: 0.72rem;
 }

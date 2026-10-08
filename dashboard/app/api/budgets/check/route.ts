@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { evaluateBudgets, recordAlert, markAlertEmailed } from "@/lib/db";
+import {
+  evaluateBudgets,
+  recordAlert,
+  markAlertEmailed,
+  evaluateCreditPools,
+  markCreditPoolAlerted,
+} from "@/lib/db";
 import { monthRange, formatUsd } from "@/lib/format";
 import { taipeiDay } from "@/lib/range";
 import { sendMail, mailConfigured, alertRecipients } from "@/lib/mail";
@@ -112,6 +118,53 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // GCP 贈金餘額（2026-10-08）。掛在同一支 cron 上，不另開排程——
+  // 多一條排程就多一個「它其實沒在跑」而沒人發現的地方。
+  // 一次跌破只寄一封：alerted_at 有值就不再寄，校正或補記贈金時才會清掉。
+  const credits = await evaluateCreditPools();
+  const creditFired: Array<{ poolId: number; label: string; estimateTwd: number; emailed: boolean; emailError?: string }> = [];
+  for (const c of credits) {
+    if (!c.enabled || c.alertedAt) continue;
+    if (c.level !== "low" && c.level !== "empty") continue;
+    const est = c.estimateTwd as number;
+    if (dryRun) {
+      creditFired.push({ poolId: c.id, label: c.label, estimateTwd: est, emailed: false });
+      continue;
+    }
+    const subject =
+      c.level === "empty"
+        ? `[CostScale] ${c.label} 的 GCP 贈金預估已用完，現在起會扣真錢`
+        : `[CostScale] ${c.label} 的 GCP 贈金只剩約 NT$${est.toFixed(0)}，該換帳號了`;
+    const lines = [
+      `帳號：${c.label}`,
+      `預估剩餘：NT$${est.toFixed(2)}（警示線 NT$${c.warnBelowTwd.toFixed(0)}）`,
+      `算法：${c.anchorDay} 在控制台讀到 NT$${c.anchorBalanceTwd.toFixed(2)}` +
+        (c.grantsTwd > 0 ? `，之後補記贈金 NT$${c.grantsTwd.toFixed(2)}` : "") +
+        `，扣掉之後被抵掉的 NT$${(c.usedTwd ?? 0).toFixed(2)}`,
+      `帳單資料只到：${c.dataThrough ?? "未知"}` +
+        (c.dailyBurnTwd ? `　最近每天約用 NT$${c.dailyBurnTwd.toFixed(0)}` : ""),
+      "",
+      "這是預估值，而且只會偏低：每月新發的贈金如果沒有補記，就沒有算進來。",
+      "請先到控制台的「抵免額」頁核對實際餘額：",
+      c.consoleUrl ?? "（未設定連結）",
+      "",
+      "核對後二選一：",
+      "1. 實際還很多 → 到儀表板按「校正」填入實際餘額，警示會重新計算。",
+      "2. 真的快用完 → 照使用說明「GCP 帳單 → 把閘道的 Vertex 換到另一個帳號付費」換帳號。",
+      "",
+      `儀表板：${(process.env.AUTH_URL ?? "（未設定 AUTH_URL）").replace(/\/+$/, "")}/billing`,
+    ];
+    const result = await sendMail(subject, lines.join("\n"));
+    await markCreditPoolAlerted(c.id, result.ok ? undefined : result.error);
+    creditFired.push({
+      poolId: c.id,
+      label: c.label,
+      estimateTwd: est,
+      emailed: result.ok,
+      emailError: result.ok ? undefined : result.error,
+    });
+  }
+
   return NextResponse.json({
     period: period.slice(0, 7),
     dryRun,
@@ -122,5 +175,14 @@ export async function POST(request: NextRequest) {
     mail: { configured: mailConfigured(), recipients: alertRecipients().length },
     fired,
     failures,
+    credits: credits.map((c) => ({
+      id: c.id,
+      label: c.label,
+      level: c.level,
+      estimateTwd: c.estimateTwd,
+      warnBelowTwd: c.warnBelowTwd,
+      alertedAt: c.alertedAt,
+    })),
+    creditFired,
   });
 }

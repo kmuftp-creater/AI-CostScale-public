@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { getBillingSummary, getVertexReconciliation } from "@/lib/db";
+import { getBillingSummary, getVertexReconciliation, evaluateCreditPools } from "@/lib/db";
 import { formatTwd, formatTokens, formatUsd } from "@/lib/format";
 import { resolveRange } from "@/lib/range";
 import TrendChart from "@/components/TrendChart";
+import CreditPoolPanel from "./CreditPoolPanel";
 
 export const metadata = { title: "GCP 帳單 · AI CostScale" };
 export const dynamic = "force-dynamic";
@@ -29,9 +30,10 @@ export default async function BillingPage({
 }) {
   const params = await searchParams;
   const range = resolveRange(params);
-  const [billing, vertex] = await Promise.all([
+  const [billing, vertex, credits] = await Promise.all([
     getBillingSummary(new Date(range.from), new Date(range.to)),
     getVertexReconciliation(new Date(range.from), new Date(range.to)),
+    evaluateCreditPools(),
   ]);
   const directTotal = vertex.direct.reduce((s, d) => s + d.gross, 0);
 
@@ -121,6 +123,9 @@ export default async function BillingPage({
           </div>
         </div>
       </section>
+
+      {/* 贈金餘額不跟著頁首的日期區間走：它看的是「從錨點到現在」，跟報表區間無關。 */}
+      <CreditPoolPanel pools={JSON.parse(JSON.stringify(credits))} />
 
       {mixedCurrency.length > 0 ? (
         <section className="block tight">
