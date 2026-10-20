@@ -284,7 +284,10 @@ export async function listExpiringGatewayModels(daysAhead = 10): Promise<Expirin
       if (!meta?.expires) continue;
       const t = Date.parse(meta.expires + "T00:00:00Z");
       if (Number.isNaN(t)) continue;
-      const days = Math.ceil((t - Date.now()) / 86400000);
+      // 用台北「今天」的日期相減（2026-10-21）。原本拿 Date.now() 減，台北早上 8 點前
+      // 還在 UTC 的前一天，10/20 到期的模型在 10/21 凌晨會顯示「就是今天」。
+      const today = Date.parse(new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" }) + "T00:00:00Z");
+      const days = Math.round((t - today) / 86400000);
       if (days > daysAhead) continue;
       out.push({
         modelName: d.modelName,

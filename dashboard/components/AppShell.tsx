@@ -9,6 +9,7 @@ import BudgetBanner from "./BudgetBanner";
 import ReminderBanner from "./ReminderBanner";
 import ModelExpiryBanner from "./ModelExpiryBanner";
 import CreditBanner from "./CreditBanner";
+import SpikeBanner from "./SpikeBanner";
 
 async function doSignOut() {
   "use server";
@@ -69,6 +70,10 @@ export default function AppShell({
         {/* 預算超標時全站可見；資料庫不通或無預算時這裡什麼都不會渲染 */}
         <Suspense fallback={null}>
           <BudgetBanner />
+        </Suspense>
+        {/* 單日暴增（2026-10-21）緊接在預算之後：兩者都是「正在燒錢」，暴增更急 */}
+        <Suspense fallback={null}>
+          <SpikeBanner />
         </Suspense>
         {/* 與預算橫幅分開：預算是正在發生的事，提醒是即將要做的決定 */}
         <Suspense fallback={null}>

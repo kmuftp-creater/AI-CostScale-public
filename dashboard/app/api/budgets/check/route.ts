@@ -5,6 +5,9 @@ import {
   markAlertEmailed,
   evaluateCreditPools,
   markCreditPoolAlerted,
+  evaluateSpikes,
+  recordSpike,
+  markSpikeEmailed,
 } from "@/lib/db";
 import { monthRange, formatUsd } from "@/lib/format";
 import { taipeiDay } from "@/lib/range";
@@ -165,6 +168,54 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // 單日花費暴增（2026-10-21）。同一支 cron，理由同上。一個軟體一天最多一封。
+  const spikes = await evaluateSpikes();
+  const spikeFired: Array<{ appId: number; name: string; todayUsd: number; baselineUsd: number; emailed: boolean; emailError?: string }> = [];
+  for (const r of spikes.rows) {
+    if (!r.spiking || r.alerted) continue;
+    if (dryRun) {
+      spikeFired.push({ appId: r.appId, name: r.name, todayUsd: r.todayUsd, baselineUsd: r.baselineUsd, emailed: false });
+      continue;
+    }
+    const recorded = await recordSpike({
+      appId: r.appId,
+      day: spikes.day,
+      spendUsd: r.todayUsd,
+      baselineUsd: r.baselineUsd,
+      multiplier: spikes.multiplier,
+    });
+    if (recorded.status === "error") {
+      failures.push({ budgetId: -r.appId, name: `暴增：${r.name}`, error: recorded.message });
+      continue;
+    }
+    if (recorded.status === "duplicate") continue;
+    const times = r.ratio !== null ? `${r.ratio.toFixed(1)} 倍` : "前 7 天幾乎沒花錢";
+    const subject = `[CostScale] ${r.name} 今天花費暴增（平常的 ${times}）`;
+    const lines = [
+      `軟體：${r.name}`,
+      `今天（${spikes.day}，台北時間）到目前為止：US$${formatUsd(r.todayUsd)}`,
+      `前 7 天每日平均：US$${formatUsd(r.baselineUsd)}`,
+      `門檻：平均的 ${spikes.multiplier} 倍，且至少 US$${formatUsd(spikes.minUsd)}`,
+      "",
+      "常見原因：程式出錯一直重試、迴圈沒有出口、換到更貴的模型、真的來了一大批工作。",
+      "要立刻止血：到「應用程式」頁設這個軟體的「每月上限」，超過就會被閘道擋下。",
+      "",
+      "今天不會再為這個軟體寄第二封。",
+      "",
+      `儀表板：${(process.env.AUTH_URL ?? "（未設定 AUTH_URL）").replace(/\/+$/, "")}/apps`,
+    ];
+    const result = await sendMail(subject, lines.join("\n"));
+    await markSpikeEmailed(recorded.id, result.ok ? undefined : result.error);
+    spikeFired.push({
+      appId: r.appId,
+      name: r.name,
+      todayUsd: r.todayUsd,
+      baselineUsd: r.baselineUsd,
+      emailed: result.ok,
+      emailError: result.ok ? undefined : result.error,
+    });
+  }
+
   return NextResponse.json({
     period: period.slice(0, 7),
     dryRun,
@@ -184,5 +235,13 @@ export async function POST(request: NextRequest) {
       alertedAt: c.alertedAt,
     })),
     creditFired,
+    spikes: {
+      day: spikes.day,
+      multiplier: spikes.multiplier,
+      minUsd: spikes.minUsd,
+      error: spikes.error,
+      spiking: spikes.rows.filter((r) => r.spiking).map((r) => ({ name: r.name, todayUsd: r.todayUsd, baselineUsd: r.baselineUsd, alerted: r.alerted })),
+    },
+    spikeFired,
   });
 }

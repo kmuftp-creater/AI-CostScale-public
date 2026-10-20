@@ -28,9 +28,13 @@ export default async function ReminderBanner() {
     <div className={`budget-banner ${worst}`} role="status">
       <span className="budget-banner-tag">{overdue.length > 0 ? "已逾期" : "即將到期"}</span>
       <span className="budget-banner-body">{items.map(describe).join("、")}</span>
-      <Link className="budget-banner-link" href="/apps">
-        前往設定
-      </Link>
+      {/* 每筆提醒自己知道該去哪一頁（2026-10-21 之前一律連應用程式，訂閱的提醒點過去改不到）。
+          同時有兩種時兩顆都給，依最急的那筆排前面。 */}
+      {[...new Set(items.map((i) => i.href))].map((href) => (
+        <Link key={href} className="budget-banner-link" href={href}>
+          {href === "/subscriptions" ? "前往訂閱" : "前往應用程式"}
+        </Link>
+      ))}
     </div>
   );
 }

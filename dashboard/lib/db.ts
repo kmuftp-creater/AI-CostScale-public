@@ -2518,6 +2518,11 @@ export async function markAclSynced(appId: number, error?: string): Promise<void
 export type Reminder = {
   kind: "review" | "billing";
   name: string;
+  /**
+   * 要去哪一頁處理。訂閱的複查日與續約在「訂閱」頁、軟體的複查日在「應用程式」頁——
+   * 2026-10-21 之前橫幅一律連到應用程式，訂閱的提醒點過去找不到東西可改。
+   */
+  href: "/apps" | "/subscriptions";
   /** 剩餘天數。負數代表已經過了。 */
   days: number;
   detail: string;
@@ -2538,16 +2543,17 @@ export async function listReminders(daysAhead = 7): Promise<Reminder[]> {
 
     const { rows: reviews } = await client.query(
       `SELECT name, review_at,
-              (review_at - CURRENT_DATE) AS days
+              (review_at - (now() AT TIME ZONE 'Asia/Taipei')::date) AS days
          FROM costscale.apps
         WHERE review_at IS NOT NULL
-          AND review_at <= CURRENT_DATE + ($1 || ' days')::interval
+          AND review_at <= (now() AT TIME ZONE 'Asia/Taipei')::date + ($1 || ' days')::interval
         ORDER BY review_at`,
       [daysAhead]
     );
     for (const r of reviews) {
       out.push({
         kind: "review",
+        href: "/apps",
         name: r.name,
         days: Number(r.days),
         detail: "訂閱設定複查日",
@@ -2562,17 +2568,18 @@ export async function listReminders(daysAhead = 7): Promise<Reminder[]> {
     // 所以 detail 要把扣款日一起講出來，光說「該複查了」沒有回答「什麼時候之前」。
     const { rows: subReviews } = await client.query(
       `SELECT service, plan, billing_day,
-              (review_at - CURRENT_DATE) AS days
+              (review_at - (now() AT TIME ZONE 'Asia/Taipei')::date) AS days
          FROM costscale.subscriptions
         WHERE status = 'active'
           AND review_at IS NOT NULL
-          AND review_at <= CURRENT_DATE + ($1 || ' days')::interval
+          AND review_at <= (now() AT TIME ZONE 'Asia/Taipei')::date + ($1 || ' days')::interval
         ORDER BY review_at`,
       [daysAhead]
     );
     for (const r of subReviews) {
       out.push({
         kind: "review",
+        href: "/subscriptions",
         name: `${r.service}${r.plan ? ` · ${r.plan}` : ""}`,
         days: Number(r.days),
         detail: `訂閱方案複查日 · 要改的話得趕在每月 ${r.billing_day} 日扣款前`,
@@ -2584,23 +2591,29 @@ export async function listReminders(daysAhead = 7): Promise<Reminder[]> {
     const { rows: subs } = await client.query(
       `SELECT service, billing_month, billing_day, fee, tax_pct, currency,
               (CASE
-                 WHEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, billing_month, billing_day)
-                      >= CURRENT_DATE
-                 THEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, billing_month, billing_day)
-                 ELSE make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int + 1, billing_month, billing_day)
-               END) AS next_billing
+                 WHEN make_date(EXTRACT(YEAR FROM (now() AT TIME ZONE 'Asia/Taipei')::date)::int, billing_month, billing_day)
+                      >= (now() AT TIME ZONE 'Asia/Taipei')::date
+                 THEN make_date(EXTRACT(YEAR FROM (now() AT TIME ZONE 'Asia/Taipei')::date)::int, billing_month, billing_day)
+                 ELSE make_date(EXTRACT(YEAR FROM (now() AT TIME ZONE 'Asia/Taipei')::date)::int + 1, billing_month, billing_day)
+               END) AS next_billing,
+              ((CASE
+                 WHEN make_date(EXTRACT(YEAR FROM (now() AT TIME ZONE 'Asia/Taipei')::date)::int, billing_month, billing_day)
+                      >= (now() AT TIME ZONE 'Asia/Taipei')::date
+                 THEN make_date(EXTRACT(YEAR FROM (now() AT TIME ZONE 'Asia/Taipei')::date)::int, billing_month, billing_day)
+                 ELSE make_date(EXTRACT(YEAR FROM (now() AT TIME ZONE 'Asia/Taipei')::date)::int + 1, billing_month, billing_day)
+               END) - (now() AT TIME ZONE 'Asia/Taipei')::date) AS days
          FROM costscale.subscriptions
         WHERE status = 'active'
           AND billing_cycle = 'yearly'
           AND billing_month IS NOT NULL`
     );
     for (const s of subs) {
-      const days = Math.ceil(
-        (new Date(s.next_billing).getTime() - Date.now()) / 86400000
-      );
+      // 天數在 SQL 用台北日算好：在這裡拿 Date 相減會用到容器的 UTC，又差一天。
+      const days = Number(s.days);
       if (days <= daysAhead) {
         out.push({
           kind: "billing",
+          href: "/subscriptions",
           name: s.service,
           days,
           // 提醒要講的是「會被扣多少」，所以顯示含稅的實付金額，不是牌價。
@@ -4165,5 +4178,167 @@ export async function markCreditPoolAlerted(id: number, error?: string): Promise
     );
   } catch (err) {
     console.warn("[db] markCreditPoolAlerted failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 單日花費暴增警示（2026-10-21，db/init/35）
+//
+// 今天（台北日）到目前為止的花費 ≥ 前 7 天每日平均 × 倍數，且今天至少花了最低金額。
+// 今天還沒過完就拿來比，所以只會晚報、不會誤報。
+// ---------------------------------------------------------------------------
+
+export const SPIKE_DEFAULT_MULTIPLIER = 3;
+export const SPIKE_DEFAULT_MIN_USD = 0.5;
+
+export type SpikeRow = {
+  appId: number;
+  name: string;
+  todayUsd: number;
+  /** 前 7 天（不含今天）的每日平均。沒資料的日子算 0，新軟體的基準會偏低——所以才要最低金額。 */
+  baselineUsd: number;
+  /** 今天 ÷ 基準。基準是 0 時是 null（除不下去，不要補一個大數字）。 */
+  ratio: number | null;
+  spiking: boolean;
+  /** 今天已經報過了（spike_alerts 有這一列） */
+  alerted: boolean;
+};
+
+export type SpikeStatus = {
+  day: string;
+  multiplier: number;
+  minUsd: number;
+  rows: SpikeRow[];
+  /** 查詢失敗。失敗時 rows 是空的，**不能**讀成「今天沒有暴增」。 */
+  error: string | null;
+};
+
+function positiveOr(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+export async function evaluateSpikes(): Promise<SpikeStatus> {
+  const day = taipeiDay(new Date());
+  const settings = await getSettings();
+  const multiplier = positiveOr(settings.spike_multiplier, SPIKE_DEFAULT_MULTIPLIER);
+  const minUsd = positiveOr(settings.spike_min_usd, SPIKE_DEFAULT_MIN_USD);
+  try {
+    const { rows } = await getPool().query(
+      `WITH keys AS (
+         SELECT a.id, a.name, k AS api_key
+           FROM costscale.apps a,
+                unnest(array_append(COALESCE(a.retired_vkey_ids, '{}'), a.vkey_id)) AS k
+          WHERE a.status = 'active' AND a.vkey_id IS NOT NULL
+       ), daily AS (
+         -- startTime 是 UTC；加 8 小時才是台北日
+         SELECT keys.id, (s."startTime" + interval '8 hours')::date AS d, SUM(s.spend)::float8 AS usd
+           FROM "LiteLLM_SpendLogs" s
+           JOIN keys ON keys.api_key = s.api_key
+          WHERE s."startTime" >= ($1::date - 7 - interval '8 hours')
+          GROUP BY 1, 2
+       )
+       SELECT a.id, a.name,
+              COALESCE(SUM(daily.usd) FILTER (WHERE daily.d = $1::date), 0)::float8 AS today,
+              (COALESCE(SUM(daily.usd) FILTER (WHERE daily.d < $1::date), 0) / 7)::float8 AS baseline,
+              EXISTS (SELECT 1 FROM costscale.spike_alerts sa WHERE sa.app_id = a.id AND sa.day = $1::date) AS alerted
+         FROM costscale.apps a
+         LEFT JOIN daily ON daily.id = a.id
+        WHERE a.status = 'active' AND a.vkey_id IS NOT NULL
+        GROUP BY a.id, a.name
+        ORDER BY today DESC`,
+      [day]
+    );
+    return {
+      day,
+      multiplier,
+      minUsd,
+      error: null,
+      rows: rows.map((r) => {
+        const today = Number(r.today) || 0;
+        const baseline = Number(r.baseline) || 0;
+        return {
+          appId: r.id,
+          name: r.name,
+          todayUsd: today,
+          baselineUsd: baseline,
+          ratio: baseline > 0 ? today / baseline : null,
+          spiking: today >= minUsd && today >= baseline * multiplier,
+          alerted: Boolean(r.alerted),
+        };
+      }),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn("[db] evaluateSpikes failed:", message);
+    return { day, multiplier, minUsd, rows: [], error: message };
+  }
+}
+
+export type RecordSpikeResult =
+  | { status: "new"; id: number }
+  | { status: "duplicate" }
+  | { status: "error"; message: string };
+
+/** 一個軟體一天只記一列。已經有了就回 duplicate，呼叫端不要再寄信。 */
+export async function recordSpike(input: {
+  appId: number;
+  day: string;
+  spendUsd: number;
+  baselineUsd: number;
+  multiplier: number;
+}): Promise<RecordSpikeResult> {
+  try {
+    const { rows } = await getPool().query(
+      `INSERT INTO costscale.spike_alerts (app_id, day, spend_usd, baseline_usd, multiplier)
+       VALUES ($1, $2::date, $3, $4, $5)
+       ON CONFLICT (app_id, day) DO NOTHING
+       RETURNING id`,
+      [input.appId, input.day, input.spendUsd, input.baselineUsd, input.multiplier]
+    );
+    return rows.length ? { status: "new", id: rows[0].id } : { status: "duplicate" };
+  } catch (err) {
+    return { status: "error", message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function markSpikeEmailed(id: number, error?: string): Promise<void> {
+  try {
+    await getPool().query(
+      `UPDATE costscale.spike_alerts
+          SET emailed_at = CASE WHEN $2::text IS NULL THEN now() ELSE NULL END, email_error = $2
+        WHERE id = $1`,
+      [id, error ?? null]
+    );
+  } catch (err) {
+    console.warn("[db] markSpikeEmailed failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * 每個部署名最近 N 天經閘道被呼叫幾次（2026-10-21）。
+ * 給「模型快停用」橫幅用：沒人在用的模型到期，處理方式是移除部署，而不是趕著換模型。
+ * 查詢失敗回 null，**不能回空物件**——空物件會被讀成「全部 0 次、可以放心移除」。
+ */
+export async function countRecentCalls(
+  modelNames: string[],
+  days = 30
+): Promise<Record<string, number> | null> {
+  if (modelNames.length === 0) return {};
+  try {
+    const { rows } = await getPool().query(
+      `SELECT model_group, COUNT(*)::int AS n
+         FROM "LiteLLM_SpendLogs"
+        WHERE model_group = ANY($1)
+          AND "startTime" >= now() - ($2 || ' days')::interval
+        GROUP BY model_group`,
+      [modelNames, String(days)]
+    );
+    const out: Record<string, number> = Object.fromEntries(modelNames.map((m) => [m, 0]));
+    for (const r of rows) out[r.model_group] = Number(r.n);
+    return out;
+  } catch (err) {
+    console.warn("[db] countRecentCalls failed:", err instanceof Error ? err.message : err);
+    return null;
   }
 }
