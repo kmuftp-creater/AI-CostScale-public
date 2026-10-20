@@ -1,6 +1,10 @@
 import { resolveRange } from "@/lib/range";
 import RoutingSection from "./RoutingSection";
 import TelemetrySection from "./TelemetrySection";
+import ModelSwapPanel from "./ModelSwapPanel";
+import ThinkingSharePanel from "./ThinkingSharePanel";
+import { getAppModelUsage, getFxRate } from "@/lib/db";
+import { readGateway, listConfigDeployments } from "@/lib/keys";
 
 export const metadata = { title: "通道與用量 · AI CostScale" };
 export const dynamic = "force-dynamic";
@@ -24,6 +28,18 @@ export default async function ChannelsPage({
   // 網址會變，數字仍是本月而微標仍寫「本月」。日期選單把這一頁列進
   // RANGE_AWARE，就得真的吃得下三種模式（2026-08-26 修）。
   const range = resolveRange(params);
+  // 換模型試算固定看過去 30 天，不跟日期選單走
+  const [swapUsage, gw, cfg, fx] = await Promise.all([
+    getAppModelUsage(30),
+    readGateway(),
+    listConfigDeployments(),
+    getFxRate(),
+  ]);
+  const swapGateway = {
+    live: gw.live,
+    configNames: cfg.map((c) => c.modelName),
+    error: gw.error ?? (cfg.length === 0 ? "讀不到設定檔裡的部署清單" : null),
+  };
 
   return (
     <>
@@ -44,6 +60,8 @@ export default async function ChannelsPage({
         </div>
       </section>
       <TelemetrySection from={range.from} to={range.to} />
+      <ModelSwapPanel usage={swapUsage} gateway={swapGateway} fx={fx.rate} />
+      <ThinkingSharePanel usage={swapUsage} fx={fx.rate} />
     </>
   );
 }

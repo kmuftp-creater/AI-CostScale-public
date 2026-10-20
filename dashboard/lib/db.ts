@@ -4342,3 +4342,253 @@ export async function countRecentCalls(
     return null;
   }
 }
+
+/**
+ * 訂閱額度使用率（過去 30 天）（2026-10-21）。
+ *
+ * 週期怎麼切：上游回報的 reset_at 會漂移（用量是 0 時，它每次都是「現在 + 一個視窗」），
+ * 直接依 reset_at 分組會把一個週期拆成幾十個。所以改成依抓取時間排序，
+ * reset_at 跟上一筆一樣就一定是同一個週期（重置後上游偶爾還回報舊值、Claude 週視窗的 used 也會在同週期內起伏，實測都出現過）；
+ * reset_at 變了，而且「上一筆的 reset_at 已經過了」或「used 比上一筆低 5 個百分點以上（提前重置）」，才換下一個週期；
+ * 一個週期的結束時間取它最後一筆的 reset_at；
+ * 「本週目前」只能是最後一個週期，被新週期取代的舊週期（提前重置）一律算已結束。
+ * 只讀不寫，查詢失敗時 error 有值、rows 是空的，不能讀成「沒有使用資料」。
+ */
+export type SubQuotaRow = {
+  provider: string;
+  windowLabel: string;
+  plan: string | null;
+  /** 已結束週期的峰值平均／最高；沒有已結束週期時是 null */
+  avgPeak: number | null;
+  maxPeak: number | null;
+  endedCycles: number;
+  /** 已結束週期中峰值 >= 100 的個數 */
+  fullCycles: number;
+  /** 本週（尚未結束）目前的累計 used；沒有進行中的週期是 null */
+  currentUsed: number | null;
+  currentResetAt: Date | null;
+  /** 對應的 5 小時視窗；對不上是 null。fiveHourFull 是過去 30 天峰值 >= 100 的週期數 */
+  fiveHourLabel: string | null;
+  fiveHourFull: number | null;
+  recommendation: SubQuotaRecommendation;
+};
+
+export type SubQuotaRecommendation =
+  | "insufficient"
+  | "never-used"
+  | "hit-limit"
+  | "downgrade"
+  | "moderate"
+  | "five-hour-only";
+
+export type SubQuotaStatus = {
+  rows: SubQuotaRow[];
+  /** 查詢失敗。失敗時 rows 是空的，**不能**讀成「沒有訂閱使用資料」。 */
+  error: string | null;
+};
+
+export function recommendSubQuota(input: {
+  endedCycles: number;
+  avgPeak: number | null;
+  maxPeak: number | null;
+  currentUsed: number | null;
+}): SubQuotaRecommendation {
+  const { endedCycles, avgPeak, maxPeak, currentUsed } = input;
+  if (endedCycles < 2) return "insufficient";
+  if ((maxPeak ?? 0) >= 100 || (currentUsed ?? 0) >= 100) return "hit-limit";
+  if ((avgPeak ?? 0) === 0 && (maxPeak ?? 0) === 0) return "never-used";
+  if ((avgPeak ?? 0) < 30 && (maxPeak ?? 0) < 50) return "downgrade";
+  return "moderate";
+}
+
+export async function getSubQuotaUsage(): Promise<SubQuotaStatus> {
+  try {
+    const { rows } = await getPool().query(
+      `WITH h AS (
+         SELECT provider, window_label, used_percent::float8 AS u, reset_at, fetched_at,
+                lag(reset_at)     OVER w AS prev_reset,
+                lag(used_percent) OVER w AS prev_used
+           FROM costscale.sub_usage_history
+          WHERE fetched_at >= now() - interval '30 days'
+         WINDOW w AS (PARTITION BY provider, window_label ORDER BY fetched_at)
+       ), brk AS (
+         SELECT *,
+                CASE WHEN prev_used IS NULL THEN 0
+                     WHEN reset_at IS NOT DISTINCT FROM prev_reset THEN 0
+                     WHEN (prev_reset IS NOT NULL AND prev_reset <= fetched_at) OR u < prev_used - 5 THEN 1
+                     ELSE 0 END AS b
+           FROM h
+       ), cyc AS (
+         SELECT *, SUM(b) OVER (PARTITION BY provider, window_label ORDER BY fetched_at) AS cid
+           FROM brk
+       ), cycles AS (
+         SELECT provider, window_label, cid, MAX(u) AS peak,
+                (array_agg(reset_at ORDER BY fetched_at DESC))[1] AS end_at
+           FROM cyc
+          GROUP BY provider, window_label, cid
+       ), cycles2 AS (
+         -- 只有最後一個週期可能是「本週目前」；被新週期取代的（提前重置）一律已結束，
+         -- 即使它最後一筆的 reset_at 還在未來
+         SELECT *,
+                (cid < MAX(cid) OVER (PARTITION BY provider, window_label)
+                 OR COALESCE(end_at <= now(), false)) AS ended,
+                (cid = MAX(cid) OVER (PARTITION BY provider, window_label)
+                 AND COALESCE(end_at > now(), false)) AS is_cur
+           FROM cycles
+       )
+       SELECT c.provider, c.window_label, s.window_seconds, s.plan,
+              COUNT(*) FILTER (WHERE c.ended)::int AS ended_n,
+              AVG(c.peak) FILTER (WHERE c.ended)::float8 AS avg_peak,
+              MAX(c.peak) FILTER (WHERE c.ended)::float8 AS max_peak,
+              COUNT(*) FILTER (WHERE c.ended AND c.peak >= 100)::int AS full_ended,
+              COUNT(*) FILTER (WHERE c.peak >= 100)::int AS full_all,
+              (array_agg(c.peak ORDER BY c.end_at DESC) FILTER (WHERE c.is_cur))[1]::float8 AS cur_used,
+              MAX(c.end_at) FILTER (WHERE c.is_cur) AS cur_reset
+         FROM cycles2 c
+         JOIN costscale.sub_usage s
+           ON s.provider = c.provider AND s.window_label = c.window_label
+        WHERE s.window_seconds IN (18000, 604800)
+        GROUP BY c.provider, c.window_label, s.window_seconds, s.plan
+        ORDER BY c.provider, c.window_label`
+    );
+    const weekly = rows.filter((r) => Number(r.window_seconds) === 604800);
+    const fiveH = rows.filter((r) => Number(r.window_seconds) === 18000);
+    // 5 小時視窗對應同名前綴：「Gemini Weekly」對「Gemini 5h」，「Weekly」對「5h」
+    const prefixOf = (label: string, suffix: RegExp) => label.replace(suffix, "").trim();
+    const used = new Set<string>();
+    const out: SubQuotaRow[] = [];
+    for (const w of weekly) {
+      const prefix = prefixOf(w.window_label, /weekly$/i);
+      const match = fiveH.find(
+        (f) => f.provider === w.provider && prefixOf(f.window_label, /5h$/i) === prefix
+      );
+      if (match) used.add(`${match.provider}|${match.window_label}`);
+      const endedCycles = Number(w.ended_n);
+      const avgPeak = w.avg_peak === null ? null : Number(w.avg_peak);
+      const maxPeak = w.max_peak === null ? null : Number(w.max_peak);
+      const currentUsed = w.cur_used === null ? null : Number(w.cur_used);
+      out.push({
+        provider: w.provider,
+        windowLabel: w.window_label,
+        plan: w.plan || null,
+        avgPeak,
+        maxPeak,
+        endedCycles,
+        fullCycles: Number(w.full_ended),
+        currentUsed,
+        currentResetAt: w.cur_reset ? new Date(w.cur_reset) : null,
+        fiveHourLabel: match ? match.window_label : null,
+        fiveHourFull: match ? Number(match.full_all) : null,
+        recommendation: recommendSubQuota({ endedCycles, avgPeak, maxPeak, currentUsed }),
+      });
+    }
+    // 對不上週視窗的 5 小時視窗不硬配，單獨列
+    for (const f of fiveH) {
+      if (used.has(`${f.provider}|${f.window_label}`)) continue;
+      out.push({
+        provider: f.provider,
+        windowLabel: f.window_label,
+        plan: f.plan || null,
+        avgPeak: null,
+        maxPeak: null,
+        endedCycles: 0,
+        fullCycles: 0,
+        currentUsed: null,
+        currentResetAt: null,
+        fiveHourLabel: f.window_label,
+        fiveHourFull: Number(f.full_all),
+        recommendation: "five-hour-only",
+      });
+    }
+    return { rows: out, error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn("[db] getSubQuotaUsage failed:", message);
+    return { rows: [], error: message };
+  }
+}
+
+// ── 軟體 × 模型 用量（換模型試算、思考 token 佔比共用） ─────────────────
+
+export type AppModelUsageRow = {
+  appId: number;
+  appName: string;
+  /** 實際打到的底層模型，例如 vertex_ai/gemini-3.1-flash-lite */
+  model: string;
+  /** 部署名（model_group），例如 gemini-lite-paid；沒有記到部署名的舊紀錄為空字串 */
+  modelGroup: string;
+  calls: number;
+  promptTokens: number;
+  /** 快取命中的輸入 token（已包含在 promptTokens 內） */
+  cachedPromptTokens: number;
+  /** 已包含思考 token */
+  completionTokens: number;
+  reasoningTokens: number;
+  /** 紀錄裡有 reasoning_tokens 這個鍵的列數；0 代表這個模型沒有回報思考量 */
+  reasoningReportedCalls: number;
+  spendUsd: number;
+  /** 閘道記下的思考費用；沒有就是 0 */
+  reasoningCostUsd: number;
+};
+
+export type AppModelUsage = {
+  days: number;
+  rows: AppModelUsageRow[];
+  /** 查詢失敗。失敗時 rows 是空的，**不能**讀成「這段期間沒有用量」。 */
+  error: string | null;
+};
+
+/**
+ * 每個啟用中的軟體（含舊金鑰）在過去 N 天，依「實際模型 × 部署名」彙總的用量。
+ * 只讀 SpendLogs；有花費或有 token 的列才回傳。
+ */
+export async function getAppModelUsage(days = 30): Promise<AppModelUsage> {
+  const d = Number.isFinite(days) && days > 0 ? Math.min(Math.floor(days), 366) : 30;
+  try {
+    const { rows } = await getPool().query(
+      `WITH keys AS (
+         SELECT a.id, a.name, k AS api_key
+           FROM costscale.apps a,
+                unnest(array_append(COALESCE(a.retired_vkey_ids, '{}'), a.vkey_id)) AS k
+          WHERE a.status = 'active' AND a.vkey_id IS NOT NULL
+       )
+       SELECT keys.id, keys.name, s.model, COALESCE(s.model_group, '') AS model_group,
+              COUNT(*)::int AS calls,
+              COALESCE(SUM(s.prompt_tokens), 0)::float8 AS prompt_tokens,
+              COALESCE(SUM(COALESCE((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0)), 0)::float8 AS cached_tokens,
+              COALESCE(SUM(s.completion_tokens), 0)::float8 AS completion_tokens,
+              COALESCE(SUM(COALESCE((s.metadata->'usage_object'->'completion_tokens_details'->>'reasoning_tokens')::bigint, 0)), 0)::float8 AS reasoning_tokens,
+              COUNT(*) FILTER (WHERE s.metadata->'usage_object'->'completion_tokens_details' ? 'reasoning_tokens')::int AS reasoning_calls,
+              COALESCE(SUM(s.spend), 0)::float8 AS spend_usd,
+              COALESCE(SUM(COALESCE((s.metadata->'cost_breakdown'->>'reasoning_cost')::float8, 0)), 0)::float8 AS reasoning_cost_usd
+         FROM "LiteLLM_SpendLogs" s
+         JOIN keys ON keys.api_key = s.api_key
+        WHERE s."startTime" >= now() - make_interval(days => $1::int)
+        GROUP BY keys.id, keys.name, s.model, COALESCE(s.model_group, '')
+        ORDER BY keys.name, spend_usd DESC`,
+      [d]
+    );
+    return {
+      days: d,
+      error: null,
+      rows: rows.map((r) => ({
+        appId: Number(r.id),
+        appName: r.name,
+        model: r.model ?? "",
+        modelGroup: r.model_group,
+        calls: Number(r.calls),
+        promptTokens: Number(r.prompt_tokens),
+        cachedPromptTokens: Number(r.cached_tokens),
+        completionTokens: Number(r.completion_tokens),
+        reasoningTokens: Number(r.reasoning_tokens),
+        reasoningReportedCalls: Number(r.reasoning_calls),
+        spendUsd: Number(r.spend_usd),
+        reasoningCostUsd: Number(r.reasoning_cost_usd),
+      })),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn("[db] getAppModelUsage failed:", message);
+    return { days: d, rows: [], error: message };
+  }
+}

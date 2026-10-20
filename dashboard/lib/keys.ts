@@ -227,7 +227,7 @@ export async function listConfigDeployments(): Promise<
 
 // ── 閘道現場 ─────────────────────────────────────────────────────────
 
-type LiveDeployment = {
+export type LiveDeployment = {
   modelName: string;
   backendModel: string;
   apiBase: string;
@@ -242,9 +242,11 @@ type LiveDeployment = {
    */
   effInputPerMTok: number;
   effOutputPerMTok: number;
+  /** 快取命中輸入 token 的單價（每百萬）。閘道沒給就是 null。換模型試算用。 */
+  cacheReadPerMTok: number | null;
 };
 
-async function readGateway(): Promise<{ live: LiveDeployment[]; error: string | null }> {
+export async function readGateway(): Promise<{ live: LiveDeployment[]; error: string | null }> {
   const key = process.env.LITELLM_MASTER_KEY || "";
   if (!key) return { live: [], error: "伺服器未設定 LITELLM_MASTER_KEY" };
   try {
@@ -275,6 +277,9 @@ async function readGateway(): Promise<{ live: LiveDeployment[]; error: string | 
         id,
         effInputPerMTok: perM(info.input_cost_per_token),
         effOutputPerMTok: perM(info.output_cost_per_token),
+        cacheReadPerMTok: Number.isFinite(Number(info.cache_read_input_token_cost)) && info.cache_read_input_token_cost != null
+          ? perM(info.cache_read_input_token_cost)
+          : null,
       });
     }
     return { live, error: null };

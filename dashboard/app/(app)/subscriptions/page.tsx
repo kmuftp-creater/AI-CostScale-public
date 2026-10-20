@@ -1,16 +1,18 @@
-import { listSubscriptions, listSubscriptionCharges, getFxRate, getSettings } from "@/lib/db";
+import { listSubscriptions, listSubscriptionCharges, getFxRate, getSettings, getSubQuotaUsage } from "@/lib/db";
 import SubscriptionsClient from "./SubscriptionsClient";
 import FxSettingsClient from "./FxSettingsClient";
+import SubUsagePanel from "./SubUsagePanel";
 
 export const metadata = { title: "訂閱 · AI CostScale" };
 export const dynamic = "force-dynamic";
 
 export default async function SubscriptionsPage() {
-  const [subscriptions, charges, fxRate, settings] = await Promise.all([
+  const [subscriptions, charges, fxRate, settings, subQuota] = await Promise.all([
     listSubscriptions(),
     listSubscriptionCharges(),
     getFxRate(),
     getSettings(),
+    getSubQuotaUsage(),
   ]);
 
   // Server Component 傳給 Client Component 前先序列化，避免 Date 等型別無法跨界
@@ -45,6 +47,8 @@ export default async function SubscriptionsPage() {
           />
         </div>
       </section>
+
+      <SubUsagePanel status={subQuota} />
     </>
   );
 }
