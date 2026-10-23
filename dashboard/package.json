@@ -13,7 +13,7 @@
     "marked": "^18.0.11",
     "next": "16.4.2",
     "next-auth": "^5.0.0-beta.32",
-    "nodemailer": "^8.0.11",
+    "nodemailer": "^10.2.1",
     "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -28,5 +28,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
     "typescript": "^5"
+  },
+  "overrides": {
+    "nodemailer": "$nodemailer"
   }
 }
