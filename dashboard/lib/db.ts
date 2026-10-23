@@ -4592,3 +4592,256 @@ export async function getAppModelUsage(days = 30): Promise<AppModelUsage> {
     return { days: d, rows: [], error: message };
   }
 }
+
+// ── 請求紀錄（依 feature 加總、逐筆） ───────────────────────────────────
+//
+// 只讀 SpendLogs 的計量欄位與 request_tags，不選取 messages、response、
+// proxy_server_request 或任何請求／回應內容。
+
+export const REQUEST_PAGE_SIZE = 50;
+export const REQUEST_MAX_PAGE = 2000;
+export const REQUEST_TAG_MAX_LEN = 200;
+export const NO_FEATURE_LABEL = "（未標示 feature）";
+
+export type RequestFilters = {
+  /** "all"、"none"（未歸戶）或軟體 id 的整數字串 */
+  app: string;
+  /** 空字串代表不篩選 */
+  tag: string;
+  status: "all" | "success" | "failure";
+  page: number;
+};
+
+/** 網址參數轉成可用的篩選值；不合法的值退回預設，不丟進 SQL。 */
+export function sanitizeRequestFilters(raw: {
+  app?: string;
+  tag?: string;
+  status?: string;
+  page?: string;
+}): RequestFilters {
+  const app = raw.app === "none" || (raw.app !== undefined && /^\d{1,9}$/.test(raw.app)) ? raw.app! : "all";
+  const tag = typeof raw.tag === "string" && raw.tag.length <= REQUEST_TAG_MAX_LEN ? raw.tag : "";
+  const status = raw.status === "success" || raw.status === "failure" ? raw.status : "all";
+  const pageNum = raw.page !== undefined && /^\d{1,6}$/.test(raw.page) ? Number(raw.page) : 1;
+  const page = Math.min(Math.max(pageNum, 1), REQUEST_MAX_PAGE);
+  return { app, tag, status, page };
+}
+
+/**
+ * 共用的前置 CTE。$1 = 起（含）、$2 = 訖（不含），startTime 欄位是 UTC 的 timestamp。
+ * 軟體對應：SpendLogs.api_key 等於 vkey_id 或在 retired_vkey_ids 內（含已封存）；
+ * 對不上再用金鑰表的 key_alias；都沒有就是「未歸戶」。
+ * t 輸出成 timestamptz，驅動程式才不會把 UTC 掛鐘當成本地時間。
+ */
+const REQUEST_BASE_CTE = `
+  keymap AS (
+    SELECT k AS api_key, a.id, a.name
+      FROM costscale.apps a,
+           unnest(array_append(COALESCE(a.retired_vkey_ids, '{}'), a.vkey_id)) AS k
+     WHERE k IS NOT NULL
+  ), base AS (
+    SELECT s.request_id, (s."startTime" AT TIME ZONE 'UTC') AS t, s.model, COALESCE(s.model_group, '') AS model_group,
+           s.status, COALESCE(s.prompt_tokens, 0) AS prompt_tokens,
+           COALESCE(s.completion_tokens, 0) AS completion_tokens,
+           COALESCE(s.spend, 0)::float8 AS spend,
+           CASE WHEN jsonb_typeof(s.request_tags) = 'array' THEN s.request_tags ELSE '[]'::jsonb END AS tags,
+           CASE WHEN (s.metadata->'usage_object'->'completion_tokens_details'->>'reasoning_tokens') ~ '^[0-9]{1,15}$'
+                THEN (s.metadata->'usage_object'->'completion_tokens_details'->>'reasoning_tokens')::bigint
+           END AS reasoning_tokens,
+           km.id AS app_id,
+           COALESCE(km.name, vt.key_alias, dvt.key_alias, '未歸戶') AS app_name
+      FROM public."LiteLLM_SpendLogs" s
+      LEFT JOIN LATERAL (
+        SELECT k.id, k.name FROM keymap k WHERE k.api_key = s.api_key ORDER BY k.id LIMIT 1
+      ) km ON true
+      LEFT JOIN LATERAL (
+        SELECT v.key_alias FROM public."LiteLLM_VerificationToken" v
+         WHERE km.id IS NULL AND v.token = s.api_key LIMIT 1
+      ) vt ON true
+      LEFT JOIN LATERAL (
+        SELECT d.key_alias FROM public."LiteLLM_DeletedVerificationToken" d
+         WHERE km.id IS NULL AND vt.key_alias IS NULL AND d.token = s.api_key LIMIT 1
+      ) dvt ON true
+     WHERE s."startTime" >= $1::timestamp AND s."startTime" < $2::timestamp
+  )`;
+
+export type FeatureUsageRow = {
+  /** "feature:xxx" 或 NO_FEATURE_LABEL */
+  feature: string;
+  /** 是否有真實的 feature 標籤（可用來帶 tag 篩選） */
+  tagged: boolean;
+  calls: number;
+  failures: number;
+  promptTokens: number;
+  completionTokens: number;
+  spendUsd: number;
+  apps: string[];
+  lastAt: Date | null;
+};
+
+export type FeatureUsage = {
+  rows: FeatureUsageRow[];
+  fxRate: number;
+  /** 查詢失敗。失敗時 rows 是空的，**不能**讀成「這段期間沒有請求」。 */
+  error: string | null;
+};
+
+/** 區間內依 feature 標籤加總。一筆請求帶多個 feature 標籤時，每個 feature 各算一次。 */
+export async function getFeatureUsage(from: Date, to: Date): Promise<FeatureUsage> {
+  const fx = await getFxRate();
+  try {
+    const { rows } = await getPool().query(
+      `WITH ${REQUEST_BASE_CTE},
+       f AS (
+         SELECT b.*, COALESCE(ft.tag, $3::text) AS feature, ft.tag IS NOT NULL AS tagged
+           FROM base b
+           LEFT JOIN LATERAL (
+             SELECT DISTINCT e AS tag FROM jsonb_array_elements_text(b.tags) e WHERE e LIKE 'feature:%'
+           ) ft ON true
+       )
+       SELECT feature, bool_or(tagged) AS tagged,
+              COUNT(*)::int AS calls,
+              COUNT(*) FILTER (WHERE status = 'failure')::int AS failures,
+              SUM(prompt_tokens)::float8 AS prompt_tokens,
+              SUM(completion_tokens)::float8 AS completion_tokens,
+              SUM(spend)::float8 AS spend_usd,
+              array_agg(DISTINCT app_name ORDER BY app_name) AS apps,
+              MAX(t) AS last_at
+         FROM f
+        GROUP BY feature
+        ORDER BY spend_usd DESC, calls DESC`,
+      [from.toISOString(), to.toISOString(), NO_FEATURE_LABEL]
+    );
+    return {
+      fxRate: fx.rate,
+      error: null,
+      rows: rows.map((r) => ({
+        feature: r.feature,
+        tagged: Boolean(r.tagged),
+        calls: Number(r.calls),
+        failures: Number(r.failures),
+        promptTokens: Number(r.prompt_tokens),
+        completionTokens: Number(r.completion_tokens),
+        spendUsd: Number(r.spend_usd),
+        apps: r.apps ?? [],
+        lastAt: r.last_at ? new Date(r.last_at) : null,
+      })),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn("[db] getFeatureUsage failed:", message);
+    return { rows: [], fxRate: fx.rate, error: message };
+  }
+}
+
+export type RequestLogRow = {
+  requestId: string;
+  at: Date;
+  appName: string;
+  modelGroup: string;
+  model: string;
+  status: string;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number | null;
+  spendUsd: number;
+  /** 業務標籤（不含 User-Agent） */
+  tags: string[];
+  userAgent: string[];
+};
+
+export type RequestLog = {
+  rows: RequestLogRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  tagOptions: string[];
+  appOptions: { id: number; name: string; status: string }[];
+  /** 查詢失敗。失敗時 rows 是空的，**不能**讀成「沒有符合的請求」。 */
+  error: string | null;
+};
+
+/** 逐筆紀錄。filters 必須先經 sanitizeRequestFilters；這裡仍全部以參數傳入。 */
+export async function getRequestLog(from: Date, to: Date, filters: RequestFilters): Promise<RequestLog> {
+  const page = Math.min(Math.max(Math.floor(filters.page) || 1, 1), REQUEST_MAX_PAGE);
+  try {
+    const params: unknown[] = [from.toISOString(), to.toISOString()];
+    const where: string[] = [];
+    if (filters.app === "none") {
+      where.push("b.app_id IS NULL");
+    } else if (/^\d{1,9}$/.test(filters.app)) {
+      params.push(Number(filters.app));
+      where.push(`b.app_id = $${params.length}::int`);
+    }
+    if (filters.tag && filters.tag.length <= REQUEST_TAG_MAX_LEN) {
+      params.push(filters.tag);
+      where.push(`b.tags ? $${params.length}::text`);
+    }
+    if (filters.status === "success" || filters.status === "failure") {
+      params.push(filters.status);
+      where.push(`b.status = $${params.length}::text`);
+    }
+    const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+    const pool = getPool();
+
+    const count = await pool.query(
+      `WITH ${REQUEST_BASE_CTE} SELECT COUNT(*)::int AS n FROM base b ${whereSql}`,
+      params
+    );
+    const total = Number(count.rows[0]?.n) || 0;
+
+    const listParams = [...params, REQUEST_PAGE_SIZE, (page - 1) * REQUEST_PAGE_SIZE];
+    const list = await pool.query(
+      `WITH ${REQUEST_BASE_CTE}
+       SELECT b.request_id, b.t, b.app_name, b.model_group, b.model, b.status,
+              b.prompt_tokens::float8 AS prompt_tokens, b.completion_tokens::float8 AS completion_tokens,
+              b.reasoning_tokens::float8 AS reasoning_tokens, b.spend, b.tags
+         FROM base b ${whereSql}
+        ORDER BY b.t DESC, b.request_id DESC
+        LIMIT $${params.length + 1}::int OFFSET $${params.length + 2}::int`,
+      listParams
+    );
+
+    const tagRes = await pool.query(
+      `WITH ${REQUEST_BASE_CTE}
+       SELECT e AS tag, COUNT(*)::int AS n
+         FROM base b, jsonb_array_elements_text(b.tags) e
+        WHERE e NOT ILIKE 'user-agent:%' AND length(e) <= $3::int
+        GROUP BY e ORDER BY n DESC, e LIMIT 300`,
+      [params[0], params[1], REQUEST_TAG_MAX_LEN]
+    );
+    const appRes = await pool.query(
+      `SELECT id, name, status FROM costscale.apps ORDER BY (status = 'active') DESC, name`
+    );
+
+    return {
+      rows: list.rows.map((r) => {
+        const all: string[] = Array.isArray(r.tags) ? r.tags.filter((x: unknown) => typeof x === "string") : [];
+        return {
+          requestId: String(r.request_id),
+          at: new Date(r.t),
+          appName: r.app_name,
+          modelGroup: r.model_group,
+          model: r.model ?? "",
+          status: r.status ?? "",
+          promptTokens: Number(r.prompt_tokens),
+          completionTokens: Number(r.completion_tokens),
+          reasoningTokens: r.reasoning_tokens === null ? null : Number(r.reasoning_tokens),
+          spendUsd: Number(r.spend),
+          tags: all.filter((x) => !/^user-agent:/i.test(x)),
+          userAgent: all.filter((x) => /^user-agent:/i.test(x)),
+        };
+      }),
+      total,
+      page,
+      pageSize: REQUEST_PAGE_SIZE,
+      tagOptions: tagRes.rows.map((r) => String(r.tag)),
+      appOptions: appRes.rows.map((r) => ({ id: Number(r.id), name: r.name, status: r.status })),
+      error: null,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn("[db] getRequestLog failed:", message);
+    return { rows: [], total: 0, page, pageSize: REQUEST_PAGE_SIZE, tagOptions: [], appOptions: [], error: message };
+  }
+}

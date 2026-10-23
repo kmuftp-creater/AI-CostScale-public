@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/subscriptions", label: "訂閱" },
   { href: "/budgets", label: "預算告警" },
   { href: "/channels", label: "通道與用量" },
+  { href: "/requests", label: "請求紀錄" },
   { href: "/billing", label: "GCP 帳單" },
   { href: "/settings", label: "設定" },
   { href: "/manual", label: "說明" },
