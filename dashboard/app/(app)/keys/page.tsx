@@ -527,6 +527,7 @@ export default async function KeysPage() {
             <span className="microlabel">加進既有模型組當輪替的一把</span>
           </div>
           <AddUpstreamKeyClient
+            usedEnvNames={providerKeys.map((k) => k.envName)}
             /* 開新模型組時要挑模型，所以把各供應商的型錄一起送過去（2026-09-21）。
                只送 id 與幾個標籤，不送整份 meta——前端只需要「挑得出來、看得出風險」。 */
             catalogs={Object.fromEntries(

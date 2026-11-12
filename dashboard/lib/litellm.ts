@@ -144,6 +144,16 @@ export async function listGatewayModelNames(): Promise<string[]> {
   return [...names].sort();
 }
 
+/** 閘道上所有訂閱模型的部署名（`sub-*`），去重。展開訂閱授權時用。 */
+export async function listGatewaySubModelNames(): Promise<string[]> {
+  const data = await getLiteLlm<{ data?: Array<Record<string, unknown>> }>("/model/info");
+  const rows = Array.isArray(data) ? data : (data?.data ?? []);
+  const names = rows
+    .map((m) => (typeof m?.model_name === "string" ? m.model_name : ""))
+    .filter((n) => n.startsWith("sub-") && !n.includes("*") && !n.includes("/"));
+  return [...new Set(names)];
+}
+
 /** 呼叫 POST /key/delete，撤銷一把虛擬金鑰（封存軟體時用）。 */
 export async function deleteVirtualKey(keys: string[]): Promise<void> {
   await callLiteLlm("/key/delete", { keys });
@@ -163,7 +173,8 @@ export async function deleteVirtualKey(keys: string[]): Promise<void> {
  * 真正能用的名字一個都沒有——那個代價比原本要避免的大。
  *
  * 而且改成明確清單**不會弄壞任何現在能用的東西**：既有模型照樣在清單裡，
- * 只是閘道新增模型時要按一次「重新同步」才會開放給既有軟體。
+ * 只是閘道新增模型時，要到該軟體的「模型」勾選才會開放（2026-11-10 起，
+ * 「重新同步」不再擴大清單，規則見 lib/key-models.ts）。
  */
 export async function setKeyAllowedModels(params: {
   key: string;

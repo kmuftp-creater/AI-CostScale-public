@@ -326,6 +326,137 @@ model_list:
       pricing_type: subscription
       mode: image_generation
 
+  # 訂閱模型選單（2026-11-10）。名稱與 bridge/server.js 的 MODEL_VARIANTS 一一對應。
+  # 專案在模型選單選這些名稱；額度與每分鐘上限沿用母通道。
+  - model_name: sub-claude-fable
+    litellm_params:
+      model: openai/sub-claude-fable
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-claude-opus
+    litellm_params:
+      model: openai/sub-claude-opus
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-claude-sonnet
+    litellm_params:
+      model: openai/sub-claude-sonnet
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-codex-gpt-6.1-sol
+    litellm_params:
+      model: openai/sub-codex-gpt-6.1-sol
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-codex-gpt-6.1-terra
+    litellm_params:
+      model: openai/sub-codex-gpt-6.1-terra
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-codex-gpt-6-astra
+    litellm_params:
+      model: openai/sub-codex-gpt-6-astra
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-codex-gpt-6-sol
+    litellm_params:
+      model: openai/sub-codex-gpt-6-sol
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-codex-gpt-6-luna
+    litellm_params:
+      model: openai/sub-codex-gpt-6-luna
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-codex-gpt-5.6-sol
+    litellm_params:
+      model: openai/sub-codex-gpt-5.6-sol
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-codex-gpt-5.6-terra
+    litellm_params:
+      model: openai/sub-codex-gpt-5.6-terra
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-codex-gpt-5.6-luna
+    litellm_params:
+      model: openai/sub-codex-gpt-5.6-luna
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-agy-gemini-4-argon
+    litellm_params:
+      model: openai/sub-agy-gemini-4-argon
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-agy-gemini-3.8-flash
+    litellm_params:
+      model: openai/sub-agy-gemini-3.8-flash
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-agy-claude-opus-5-5
+    litellm_params:
+      model: openai/sub-agy-claude-opus-5-5
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-agy-claude-sonnet-5-5
+    litellm_params:
+      model: openai/sub-agy-claude-sonnet-5-5
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+  - model_name: sub-agy-gpt-oss-120b
+    litellm_params:
+      model: openai/sub-agy-gpt-oss-120b
+      api_base: http://10.87.213.1:8788/v1
+      api_key: os.environ/BRIDGE_TOKEN
+    model_info:
+      pricing_type: subscription
+
+
 # 每月硬上限的歸零時區（2026-09-12，User 裁決「本月」改台北時間）。
 # 沒設時 LiteLLM 預設 UTC，budget_duration=1mo 會在台北每月 1 日 08:00 才歸零。
 litellm_settings:

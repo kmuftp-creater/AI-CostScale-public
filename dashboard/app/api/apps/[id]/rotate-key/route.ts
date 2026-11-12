@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth-guard";
-import { listAppSubscriptions, retireAppVkey, markAclSynced, getAppForLimit } from "@/lib/db";
+import {
+  listAppSubscriptions,
+  retireAppVkey,
+  markAclSynced,
+  getAppForLimit,
+  getKeyModelSettings,
+  VERTEX_PASSTHROUGH_PATTERN,
+} from "@/lib/db";
 import { applyHardLimit } from "@/lib/hard-limit";
 import { resolveAllowedBase } from "@/lib/acl";
+import { expandSubModels, resyncNonSubModels } from "@/lib/key-models";
 import {
   generateVirtualKey,
   deleteVirtualKey,
-  setKeyAllowedModels,
+  setKeyModelsAndAliases,
+  listGatewaySubModelNames,
   renameVirtualKey,
   LiteLlmError,
 } from "@/lib/litellm";
@@ -110,10 +119,21 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/apps/[id]/
   let aclWarning: string | null = null;
   try {
     const base = await resolveAllowedBase({ vertexPassthrough: app.vertex_passthrough });
-    await setKeyAllowedModels({
+    // 換鑰不該順便換權限（2026-11-10）：沿用舊金鑰勾選的模型與預設模型別名。
+    // 沒有舊金鑰或讀不到時，才用新軟體的預設清單。
+    const old = oldVkey ? (await getKeyModelSettings([oldVkey]))[oldVkey] : undefined;
+    const nonSub = old
+      ? [
+          ...resyncNonSubModels(old.models, base.models, VERTEX_PASSTHROUGH_PATTERN).models,
+          ...(app.vertex_passthrough ? [VERTEX_PASSTHROUGH_PATTERN] : []),
+        ]
+      : base.models;
+    await setKeyModelsAndAliases({
       key: newTokenId,
-      nonSubPatterns: base.models,
-      subModels: app.subs ?? [],
+      models: [
+        ...new Set([...nonSub, ...expandSubModels(app.subs ?? [], await listGatewaySubModelNames())]),
+      ],
+      aliases: old?.aliases ?? {},
     });
     await markAclSynced(appId, base.usedFallback ? `已推送，但用的是退路清單：${base.reason}` : undefined);
   } catch (err) {

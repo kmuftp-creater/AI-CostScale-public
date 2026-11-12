@@ -48,10 +48,10 @@ export default function AppSubsClient({ initial }: { initial: AppSub[] }) {
   const [resyncing, setResyncing] = useState(false);
 
   /**
-   * 把所有軟體的白名單重新推一次。
+   * 把所有軟體的白名單整理後重新推一次。
    *
-   * 什麼時候要按：**閘道新增或改名模型之後**。白名單存的是明確的部署名
-   * （2026-08-26 起），所以新模型不會自動開放給既有軟體。
+   * 什麼時候要按：**閘道把模型改名或移除之後**。各軟體勾選的模型會保留，
+   * 新模型要到該軟體的「模型」逐一勾選（2026-11-10 起）。
    */
   async function resync() {
     setError(null);
@@ -71,9 +71,15 @@ export default function AppSubsClient({ initial }: { initial: AppSub[] }) {
             failed.map((f) => `${f.name}（${f.error}）`).join("；")
         );
       } else {
+        const removed: { name: string; models: string[] }[] = data.removed ?? [];
         setMsg(
-          `已同步 ${data.synced.length} 個軟體，白名單含 ${data.models.length} 個模型：` +
-            data.models.join("、")
+          `已同步 ${data.synced.length} 個軟體，各軟體勾選的模型維持不變。` +
+            (removed.length > 0
+              ? `已拿掉閘道上不存在的模型：${removed
+                  .map((r) => `${r.name}（${r.models.join("、")}）`)
+                  .join("；")}。`
+              : "") +
+            "要開放新模型，請按該軟體的「模型」。"
         );
       }
     } catch {
@@ -263,6 +269,9 @@ export default function AppSubsClient({ initial }: { initial: AppSub[] }) {
           （<code>sub-claude</code>、<code>sub-codex</code>、<code>sub-gemini</code>、
           <code>sub-imagegen</code>、<code>sub-agy-claude</code>）。
           所以一個軟體可以新聞摘要走 Gemini、產圖走 <code>sub-imagegen</code>。
+          <br />
+          勾選一個來源，就會一併開放它底下可選的模型（例如 <code>sub-claude-opus</code>），
+          專案讀模型清單就能選。這些模型共用該來源的額度與每分鐘上限。
           <br />
           產圖與 <code>sub-codex</code> 共用同一個 Codex 週額度，勾一個不會多一份額度。
           <br />

@@ -32,6 +32,7 @@
 """
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -295,13 +296,10 @@ def provider_of(env_name):
         return "gemini"
     if env_name.startswith("GROQ_"):
         return "groq"
-    return {
-        "OPENROUTER_API_KEY": "openrouter",
-        "OPENAI_API_KEY": "openai",
-        "ANTHROPIC_API_KEY": "anthropic",
-        "DEEPSEEK_API_KEY": "deepseek",
-        "XAI_API_KEY": "xai",
-    }.get(env_name)
+    # 儀表板新增金鑰預設取名 ANTHROPIC_KEY_1 這種，原本只認 ANTHROPIC_API_KEY 一個名字，
+    # 那把金鑰就永遠不會被拿來抓型錄（2026-10-30）。OPENAI_BASE_URL 之類不是金鑰，不能算進來。
+    m = re.match(r"^(OPENROUTER|OPENAI|ANTHROPIC|DEEPSEEK|XAI)_(?:API_)?KEY(?:_\w+)?$", env_name)
+    return m.group(1).lower() if m else None
 
 
 FETCHERS = {

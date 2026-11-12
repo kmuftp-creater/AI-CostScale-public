@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile, rename, chmod } from "node:fs/promises";
 import path from "node:path";
 import { requireSession } from "@/lib/auth-guard";
+import { kindOfDeployment } from "@/lib/model-kind";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +106,74 @@ function str(v: unknown, max = 200): string {
   return typeof v === "string" ? v.trim().slice(0, max) : "";
 }
 
+/** 各家「列模型」的端點。OpenRouter 驗金鑰打的是 /key，那裡沒有模型清單，所以另外列。 */
+const LIST_MODELS: Record<string, { url: string; headers: (key: string) => Record<string, string> }> = {
+  gemini: {
+    url: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+    headers: (key) => ({ "x-goog-api-key": key }),
+  },
+  openai: {
+    url: "https://api.openai.com/v1/models",
+    headers: (key) => ({ Authorization: `Bearer ${key}` }),
+  },
+  anthropic: {
+    url: "https://api.anthropic.com/v1/models?limit=100",
+    headers: (key) => ({ "x-api-key": key, "anthropic-version": "2023-06-01" }),
+  },
+  groq: {
+    url: "https://api.groq.com/openai/v1/models",
+    headers: (key) => ({ Authorization: `Bearer ${key}` }),
+  },
+  openrouter: {
+    url: "https://openrouter.ai/api/v1/models",
+    headers: (key) => ({ Authorization: `Bearer ${key}` }),
+  },
+};
+
+/**
+ * 用剛貼上的金鑰當場問供應商有哪些模型（2026-10-30）。
+ *
+ * 起因（User）：「我有 claude 金鑰，我要輸入，但是他模型不會出現」。
+ * 型錄是主機端拿 .env 裡的金鑰抓的，而 ANTHROPIC_API_KEY 一直是佔位字串、每次都 401，
+ * 所以第一把真金鑰永遠進不來：要有金鑰才有型錄，要有型錄才挑得了模型、才加得進金鑰。
+ *
+ * 金鑰只拿來打這一次，不寫檔、不進紀錄；錯誤訊息也不帶回應內文，免得內文夾帶金鑰片段。
+ */
+async function listModels(
+  provider: string,
+  key: string
+): Promise<{ models: { id: string; group: string; stage: string; expires: string }[] } | { error: string }> {
+  const target = LIST_MODELS[provider];
+  try {
+    const res = await fetch(target.url, {
+      headers: target.headers(key),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      if (res.status === 401 || res.status === 403 || KEY_INVALID.test(body)) {
+        return { error: `供應商說這把金鑰無效（HTTP ${res.status}），請確認有沒有貼完整、是不是這一家的金鑰。` };
+      }
+      return { error: `上游回 HTTP ${res.status}，這不一定是金鑰的問題，稍後再試一次。` };
+    }
+    const d = (await res.json()) as {
+      data?: { id?: string }[];
+      models?: { name?: string }[];
+    };
+    const ids = d.data
+      ? d.data.map((m) => m.id ?? "")
+      : (d.models ?? []).map((m) => (m.name ?? "").replace(/^models\//, ""));
+    const models = [...new Set(ids.filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, 500)
+      .map((id) => ({ id, group: kindOfDeployment(id), stage: "", expires: "" }));
+    return { models };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: `連不到上游：${msg.slice(0, 80)}——這不是金鑰的問題。` };
+  }
+}
+
 /** GET：回最近的套用結果，讓畫面顯示「套用中／成功／失敗」。 */
 export async function GET() {
   const guard = await requireSession();
@@ -112,7 +181,11 @@ export async function GET() {
   try {
     await mkdir(SPOOL, { recursive: true });
     const names = await readdir(SPOOL);
-    const pending = names.filter((n) => n.endsWith(".json") && !n.endsWith(".status.json"));
+    // 底線開頭的是資料檔（_models.json、_tails.json），不是請求；主機端腳本也是這樣跳過。
+    // 沒排除時畫面永遠顯示「佇列中還有 2 筆」（2026-10-31）。
+    const pending = names.filter(
+      (n) => n.endsWith(".json") && !n.endsWith(".status.json") && !n.startsWith("_")
+    );
     const statuses = [];
     for (const n of names.filter((x) => x.endsWith(".status.json")).slice(-20)) {
       try {
@@ -140,6 +213,20 @@ export async function POST(request: NextRequest) {
     body = (await request.json()) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "請求 body 不是合法 JSON" }, { status: 400 });
+  }
+
+  // ── 用貼上的金鑰讀模型清單：只問不寫（2026-10-30）────────────────
+  if (str(body.op, 20) === "list-models") {
+    const provider = str(body.provider, 40);
+    const key = str(body.key, 400);
+    if (!LIST_MODELS[provider]) {
+      return NextResponse.json({ error: `這一版只支援：${Object.keys(LIST_MODELS).join("、")}` }, { status: 400 });
+    }
+    if (!key) return NextResponse.json({ error: "金鑰是空的，請先貼上金鑰。" }, { status: 400 });
+    const r = await listModels(provider, key);
+    return "error" in r
+      ? NextResponse.json({ error: r.error }, { status: 400 })
+      : NextResponse.json({ ok: true, models: r.models });
   }
 
   // ── 自訂單價：走同一條 spool（2026-09-21）──────────────────────

@@ -177,7 +177,10 @@ export default function AppsClient({
 
   function openModels(app: AppRow) {
     const cur = modelSettings[app.id];
-    setModelAllowed(cur?.allowed?.length ? cur.allowed : gatewayModels);
+    // 只留勾選清單裡有的名字。openrouter-* 這種萬用樣式沒有勾選框，
+    // 帶著它送出會被後端當成不認得的名字，而且人取消不掉。
+    const allowed = (cur?.allowed ?? []).filter((m) => gatewayModels.includes(m));
+    setModelAllowed(allowed.length ? allowed : gatewayModels);
     setModelDefault(cur?.defaultModel ?? "");
     setModelError(null);
     setModelNotice(null);
@@ -666,6 +669,16 @@ export default function AppsClient({
               <strong>模型是專案每次呼叫時指定的</strong>，這裡決定的是它「可以」用哪些。
               取消勾選的模型，那個專案打過去會收到 HTTP 403。
               訂閱通道（<code>sub-</code> 開頭）不在這裡設定，那要走下面的「訂閱橋接」面板。
+              {(modelSettings[modelTarget.id]?.allowed ?? []).some((m) => m.includes("*")) ? (
+                <>
+                  {" "}這把金鑰另外有萬用權限，儲存後會保留：
+                  <code>
+                    {(modelSettings[modelTarget.id]?.allowed ?? [])
+                      .filter((m) => m.includes("*"))
+                      .join("、")}
+                  </code>
+                </>
+              ) : null}
             </div>
             {/* 依用途分組（2026-09-21）：使用者不一定知道哪個名字是圖片、哪個是語音。 */}
             <div className="model-pick">

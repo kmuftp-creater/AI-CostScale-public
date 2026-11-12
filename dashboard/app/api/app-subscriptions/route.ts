@@ -5,10 +5,12 @@ import {
   setAppSubscriptions,
   patchAppMeta,
   markAclSynced,
-  NON_SUB_MODEL_PATTERNS,
+  getKeyModelSettings,
+  VERTEX_PASSTHROUGH_PATTERN,
 } from "@/lib/db";
-import { setKeyAllowedModels } from "@/lib/litellm";
+import { listGatewaySubModelNames, setKeyAllowedModels } from "@/lib/litellm";
 import { resolveAllowedBase } from "@/lib/acl";
+import { expandSubModels } from "@/lib/key-models";
 
 export const dynamic = "force-dynamic";
 
@@ -125,10 +127,19 @@ export async function POST(request: NextRequest) {
     // 白名單的基底改由閘道實際部署名決定（2026-08-26），
     // 三個呼叫點共用 resolveAllowedBase，避免各自算出不同的清單。
     const base = await resolveAllowedBase({ vertexPassthrough: app.vertex_passthrough });
+    // 開關訂閱只該動訂閱（2026-10-31）。原本會把非訂閱部分整份重算，
+    // 「可用模型」手動取消的項目、萬用樣式、default 別名都會被這一勾洗掉。
+    // 讀不到現況或金鑰上還沒有清單時才用基底。
+    const cur = (await getKeyModelSettings([app.vkey_id]))[app.vkey_id]?.models ?? [];
+    const curNonSub = cur.filter((m) => !m.startsWith("sub-") && m !== VERTEX_PASSTHROUGH_PATTERN);
+    const nonSub =
+      curNonSub.length > 0
+        ? [...curNonSub, ...(app.vertex_passthrough ? [VERTEX_PASSTHROUGH_PATTERN] : [])]
+        : base.models;
     await setKeyAllowedModels({
       key: app.vkey_id,
-      nonSubPatterns: base.models,
-      subModels: subs,
+      nonSubPatterns: nonSub,
+      subModels: expandSubModels(subs, await listGatewaySubModelNames()),
     });
     await markAclSynced(appId, base.usedFallback ? `已推送，但用的是退路清單：${base.reason}` : undefined);
   } catch (err) {

@@ -88,8 +88,9 @@ export async function PUT(request: NextRequest, ctx: RouteContext<"/api/apps/[id
 
   // 原本就有的訂閱通道與 Vertex 直通樣式要原樣帶過去，不能被這次的重算洗掉
   const cur = (await getKeyModelSettings([app.vkey_id]))[app.vkey_id];
+  // 萬用樣式（例如某個軟體的 openrouter-*）不在勾選清單裡，一樣要留著
   const keep = (cur?.models ?? []).filter(
-    (m) => m.startsWith("sub-") || m === VERTEX_PASSTHROUGH_PATTERN
+    (m) => m.startsWith("sub-") || m === VERTEX_PASSTHROUGH_PATTERN || m.includes("*")
   );
 
   const models = [...new Set([...nonSub, ...keep, ...(defaultModel ? [DEFAULT_ALIAS] : [])])];

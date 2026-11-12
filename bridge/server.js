@@ -26,6 +26,7 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
+const { createModelCheck, parseAgyModels } = require("./model-check");
 
 const PORT = Number(process.env.BRIDGE_PORT) || 8787;
 const TOKEN = process.env.BRIDGE_TOKEN || "";
@@ -75,7 +76,7 @@ const PROVIDERS = {
     cli: "gemini",
     rpm: Number(process.env.BRIDGE_RPM_AGY_CLAUDE) || 2,
     quota: "agy-claudegpt",
-    cliModel: process.env.BRIDGE_AGY_CLAUDE_MODEL || "claude-opus-4-6-thinking",
+    cliModel: process.env.BRIDGE_AGY_CLAUDE_MODEL || "claude-opus-5-5-medium",
   },
 };
 
@@ -94,7 +95,7 @@ const PROVIDERS = {
  */
 function resolveCliModel(provider, body) {
   if (provider.cli === "gemini") return provider.cliModel || null;
-  return body.model_alias;
+  return provider.cliModel || body.model_alias;
 }
 
 /**
@@ -318,6 +319,82 @@ function claudeInputTokens(u) {
   );
 }
 
+/**
+ * 同一個訂閱底下可選的模型（2026-11-10）。[母通道, 傳給 CLI 的模型]
+ *
+ * 專案在模型選單選的就是這些名稱。CLI、每分鐘上限與額度守門全部沿用母通道，
+ * 因為額度是按帳號算的，換模型不會多一份。
+ * 母通道決定額度池：Antigravity 的 Gemini 歸 sub-gemini，Claude 與 GPT 歸 sub-agy-claude，
+ * 兩組不能放錯，否則守門看的池跟真正花掉的池會不一致（見 resolveCliModel）。
+ * 新增一筆時，litellm-config.yaml 也要加對應的部署。
+ *
+ * 這份清單是依 2026-11 各 CLI 提供的模型寫的，會隨上游變動。
+ * 對照方式：Antigravity 跑 `agy models`；Codex 看 ~/.codex/models_cache.json 的 slug；
+ * Claude Code 用 `claude --help` 列出的別名。橋接每日檢查（model-check.js）會通知失效的項目。
+ */
+const MODEL_VARIANTS = {
+  "sub-claude-fable": ["sub-claude", "fable"],
+  "sub-claude-opus": ["sub-claude", "opus"],
+  "sub-claude-sonnet": ["sub-claude", "sonnet"],
+  "sub-codex-gpt-6.1-sol": ["sub-codex", "gpt-6.1-sol"],
+  "sub-codex-gpt-6.1-terra": ["sub-codex", "gpt-6.1-terra"],
+  "sub-codex-gpt-6-astra": ["sub-codex", "gpt-6-astra"],
+  "sub-codex-gpt-6-sol": ["sub-codex", "gpt-6-sol"],
+  "sub-codex-gpt-6-luna": ["sub-codex", "gpt-6-luna"],
+  "sub-codex-gpt-5.6-sol": ["sub-codex", "gpt-5.6-sol"],
+  "sub-codex-gpt-5.6-terra": ["sub-codex", "gpt-5.6-terra"],
+  "sub-codex-gpt-5.6-luna": ["sub-codex", "gpt-5.6-luna"],
+  "sub-agy-gemini-4-argon": ["sub-gemini", "gemini-4-argon-medium"],
+  "sub-agy-gemini-3.8-flash": ["sub-gemini", "gemini-3.8-flash-medium"],
+  "sub-agy-claude-opus-5-5": ["sub-agy-claude", "claude-opus-5-5-medium"],
+  "sub-agy-claude-sonnet-5-5": ["sub-agy-claude", "claude-sonnet-5-5-medium"],
+  "sub-agy-gpt-oss-120b": ["sub-agy-claude", "gpt-oss-120b-medium"],
+};
+for (const [name, [parent, cliModel]] of Object.entries(MODEL_VARIANTS)) {
+  PROVIDERS[name] = { ...PROVIDERS[parent], cliModel };
+}
+
+/** codex 的 model 參數：gpt- 開頭是換模型，其餘沿用原本的思考強度語意（model_alias）。 */
+function codexModelArgs(model) {
+  if (!model) return [];
+  return /^gpt-/.test(model) ? ["-m", model] : ["-c", `model_reasoning_effort=${model}`];
+}
+
+/** 問 agy 目前有哪些模型。要套更新檢查防護，否則它的孫行程會閃黑窗（見 agyUpdateGuard）。 */
+function listAgyModels() {
+  return new Promise((resolve, reject) => {
+    const guard = agyGuardFor("gemini");
+    const child = spawn(process.env.BRIDGE_AGY || "agy", ["models"], {
+      env: childEnv(),
+      cwd: WORKSPACE,
+      shell: false,
+      windowsHide: true,
+    });
+    let stdout = "";
+    const timer = setTimeout(() => child.kill(), 60_000);
+    child.stdout.on("data", (d) => (stdout += d));
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      guard.release();
+      reject(e);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      guard.release();
+      const ids = parseAgyModels(stdout);
+      if (code !== 0 || ids.length === 0) reject(new Error(`agy models 退出碼 ${code}，沒有讀到模型`));
+      else resolve(ids);
+    });
+    child.stdin.end();
+  });
+}
+
+const modelCheck = createModelCheck({
+  providers: PROVIDERS,
+  statePath: path.join(WORKSPACE, "model-check.json"),
+  listAgyModels,
+});
+
 const CLI_SPEC = {
   // 回傳單一 JSON 物件：{ result, usage: { input_tokens, output_tokens }, ... }
   claude: {
@@ -375,7 +452,7 @@ const CLI_SPEC = {
       // skill_search 仍然關著，理由不是省 token：橋接的輸入來自外部，
       // 不該讓它有機會去翻本機的 skill。
       ...CODEX_LEAN_FLAGS,
-      ...(model ? ["-c", `model_reasoning_effort=${model}`] : []),
+      ...codexModelArgs(model),
     ],
     parse(stdout) {
       let answer = "";
@@ -551,7 +628,7 @@ const STREAM_SPEC = {
       "-s",
       "read-only",
       ...CODEX_LEAN_FLAGS,
-      ...(model ? ["-c", `model_reasoning_effort=${model}`] : []),
+      ...codexModelArgs(model),
     ],
     onEvent(ev, sink) {
       if (ev.type === "item.completed" && ev.item && ev.item.type === "agent_message") {
@@ -792,6 +869,7 @@ async function handleChatStream(provider, prompt, body, res) {
     return { inTok: r.inTok, outTok: r.outTok, chunks };
   } catch (e) {
     if (!headed) throw e;
+    modelCheck.noteFailure(body.model, e.message);
     console.error(`[bridge] 串流中斷（${provider.cli}）：${e.message}`);
     sseSend(res, { error: { message: e.message, type: "bridge_stream_error" } });
     res.write(`data: [DONE]${String.fromCharCode(10, 10)}`);
@@ -2064,6 +2142,7 @@ const server = http.createServer((req, res) => {
 
       if (body.stream) {
         const r = await handleChatStream(provider, prompt, body, res);
+        modelCheck.noteSuccess(body.model);
         console.log(
           `[bridge] ok ${provider.cli} stream ${Date.now() - started}ms in=${r.inTok} out=${r.outTok} chunks=${r.chunks} queued=${queued}`
         );
@@ -2072,6 +2151,7 @@ const server = http.createServer((req, res) => {
       }
 
       const { answer, inTok, outTok } = await callCli(provider.cli, prompt, resolveCliModel(provider, body));
+      modelCheck.noteSuccess(body.model);
       send(res, 200, {
         id: `bridge-${Date.now()}`,
         object: "chat.completion",
@@ -2090,6 +2170,7 @@ const server = http.createServer((req, res) => {
         `[bridge] ok ${provider.cli} ${Date.now() - started}ms in=${inTok} out=${outTok} queued=${queued}`
       );
     } catch (e) {
+      modelCheck.noteFailure(body.model, e.message);
       console.error(`[bridge] fail ${provider.cli} ${Date.now() - started}ms: ${e.message}`);
       send(res, e.status || 500, { error: { message: e.message } });
     } finally {
@@ -2108,4 +2189,5 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`[bridge]   ${IMAGE_MODEL} -> codex 內建 image_gen（產圖／改圖），每分鐘上限 ${IMAGE_RPM} 次，改圖輸入上限 ${IMAGE_EDIT_MAX_INPUTS} 張`);
   console.log(`[bridge]   圖檔取自 ${CODEX_IMAGE_DIR}，回傳後${IMAGE_CLEANUP ? "刪除本次目錄" : "保留"}`);
   console.log(`[bridge] 工作目錄 ${WORKSPACE}`);
+  modelCheck.start();
 });

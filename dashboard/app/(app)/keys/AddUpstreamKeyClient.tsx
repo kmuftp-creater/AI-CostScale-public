@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatTaipei } from "@/lib/format";
+import { nextEnvName, nextIndexedName } from "@/lib/env-name";
 
 /**
  * 新增上游金鑰（2026-09-07）。
@@ -66,29 +67,14 @@ export type CatalogModel = {
   expires: string;
 };
 
-/**
- * 從「這個模型組現在掛的變數名」推出下一個。
- * 例：GEMINI_FREE_KEY_1..5 → GEMINI_FREE_KEY_6。
- * 推不出來（沒有數字結尾）就在後面接 _2，再不行就交給人填。
- */
-function nextEnvName(envNames: string[]): string {
-  const numbered = envNames
-    .map((n) => /^(.*?)(\d+)$/.exec(n))
-    .filter((m): m is RegExpExecArray => !!m);
-  if (numbered.length > 0) {
-    const prefix = numbered[0][1];
-    const max = Math.max(...numbered.map((m) => Number(m[2])));
-    return `${prefix}${max + 1}`;
-  }
-  if (envNames.length > 0) return `${envNames[0]}_2`;
-  return "";
-}
-
 export default function AddUpstreamKeyClient({
   options,
+  usedEnvNames,
   catalogs,
 }: {
   options: Option[];
+  /** 全站已使用的環境變數名。建議值要避開全部，不是只避開同一個模型組。 */
+  usedEnvNames: string[];
   /**
    * 每個供應商現在有哪些模型（來自主機端每 6 小時抓的型錄）。
    * 開新模型組時用來挑——讓人自己打字的話，打錯一個字設定檔看起來完全正常，
@@ -118,8 +104,16 @@ export default function AddUpstreamKeyClient({
     () => options.find((o) => o.modelName === modelName) ?? null,
     [options, modelName]
   );
+  /** 主機端型錄抓不到的供應商，用貼上的金鑰當場讀到的清單（2026-10-30）。 */
+  const [fetched, setFetched] = useState<Record<string, CatalogModel[]>>({});
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelsMsg, setModelsMsg] = useState<string | null>(null);
+  const hostHasCatalog = (catalogs[provider] ?? []).length > 0;
   /** 這個供應商的型錄，依分類排好。沒有型錄（沒抓到或不支援）就是空的。 */
-  const catalog = useMemo(() => catalogs[provider] ?? [], [catalogs, provider]);
+  const catalog = useMemo(
+    () => ((catalogs[provider] ?? []).length > 0 ? catalogs[provider] : (fetched[provider] ?? [])),
+    [catalogs, fetched, provider]
+  );
   const catalogByGroup = useMemo(() => {
     const m = new Map<string, CatalogModel[]>();
     for (const c of catalog) {
@@ -134,12 +128,12 @@ export default function AddUpstreamKeyClient({
   useEffect(() => {
     if (envTouched) return;
     if (isNew) {
-      // 新模型組沒有既有變數可以推，給一個看得懂的起手式，讓人改。
-      setEnvVar(`${provider.toUpperCase()}_KEY_1`);
+      // 新模型組沒有自己的變數可以推，用供應商前綴接全站下一個沒用過的編號。
+      setEnvVar(nextIndexedName(`${provider.toUpperCase()}_KEY_`, usedEnvNames));
       return;
     }
-    setEnvVar(chosen ? nextEnvName(chosen.envNames) : "");
-  }, [chosen, envTouched, isNew, provider]);
+    setEnvVar(chosen ? nextEnvName(chosen.envNames, usedEnvNames) : "");
+  }, [chosen, envTouched, isNew, provider, usedEnvNames]);
 
   async function refresh() {
     try {
@@ -159,6 +153,40 @@ export default function AddUpstreamKeyClient({
     return () => clearInterval(t);
   }, []);
 
+  /**
+   * 用貼上的金鑰問供應商有哪些模型。主機端的型錄要有真金鑰才抓得到，
+   * 第一把金鑰進來之前一定是空的，不能叫人等它（2026-10-30）。
+   */
+  async function loadModels() {
+    if (!apiKey.trim()) {
+      setErr("請先把金鑰貼進「金鑰」那一格，才讀得到模型清單。");
+      return;
+    }
+    setErr(null);
+    setModelsMsg(null);
+    setLoadingModels(true);
+    try {
+      const res = await fetch("/api/upstream-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "list-models", provider, key: apiKey.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setErr(d.error ?? `讀取失敗（${res.status}）`);
+        return;
+      }
+      const models: CatalogModel[] = Array.isArray(d.models) ? d.models : [];
+      setFetched((cur) => ({ ...cur, [provider]: models }));
+      if (models.length === 0) setErr("這把金鑰可以用，但供應商回的模型清單是空的。");
+      else setModelsMsg(`讀到 ${models.length} 支模型，請到「打哪一支模型」選一支。`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingModels(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
@@ -167,7 +195,13 @@ export default function AddUpstreamKeyClient({
     // 缺欄位要「講出來」，不是把按鈕變灰。
     if (isNew) {
       if (!newName.trim()) return setErr("新模型組要取一個名字，那就是專案之後要送的字串。");
-      if (!newModel) return setErr("要挑一支模型。清單是這個供應商現在真的還有的那些。");
+      if (!newModel) {
+        return setErr(
+          catalog.length === 0
+            ? "還沒有模型清單。貼上金鑰後按「用這把金鑰讀取模型」，再挑一支。"
+            : "要挑一支模型。清單是這個供應商現在真的還有的那些。"
+        );
+      }
       if (options.some((o) => o.modelName === newName.trim())) {
         return setErr(`${newName.trim()} 已經存在了。要加進它，直接在上面的下拉選它就好。`);
       }
@@ -205,7 +239,7 @@ export default function AddUpstreamKeyClient({
       // 在那之前建議值還是舊的——連按兩次就會撞名。
       // User 2026-09-07 就是這樣連續送了兩次 GEMINI_FREE_KEY_6。
       // 這裡先在前端往前推一個，套用完之後伺服器那邊會再校正。
-      setEnvVar((cur) => nextEnvName([cur]));
+      setEnvVar((cur) => nextEnvName([cur], usedEnvNames));
       setEnvTouched(true);
       refresh();
       router.refresh();
@@ -221,7 +255,15 @@ export default function AddUpstreamKeyClient({
       <form onSubmit={submit} className="key-form">
         <label>
           供應商
-          <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <select
+            value={provider}
+            onChange={(e) => {
+              setProvider(e.target.value);
+              // 不清掉的話，換供應商後會送出「anthropic/gemini-xxx」這種兩家湊起來的模型名。
+              setNewModel("");
+              setModelsMsg(null);
+            }}
+          >
             {PROVIDERS.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.label}
@@ -267,7 +309,11 @@ export default function AddUpstreamKeyClient({
               打哪一支模型
               <select value={newModel} onChange={(e) => setNewModel(e.target.value)}>
                 <option value="">
-                  {catalog.length === 0 ? "這個供應商還沒有型錄（主機端每 6 小時抓一次）" : "請選擇"}
+                  {loadingModels
+                    ? "讀取中…"
+                    : catalog.length === 0
+                      ? "還沒有清單：貼上金鑰後按下方按鈕讀取"
+                      : "請選擇"}
                 </option>
                 {catalogByGroup.map(([g, items]) => (
                   <optgroup key={g} label={g}>
@@ -305,6 +351,12 @@ export default function AddUpstreamKeyClient({
           />
         </label>
 
+        {isNew && !hostHasCatalog ? (
+          <button type="button" className="btn-ghost" onClick={loadModels} disabled={loadingModels}>
+            {loadingModels ? "讀取中…" : "用這把金鑰讀取模型"}
+          </button>
+        ) : null}
+
         <label>
           每分鐘上限
           <input
@@ -337,6 +389,7 @@ export default function AddUpstreamKeyClient({
 
       {err ? <div className="form-error">{err}</div> : null}
       {msg ? <div className="form-ok">{msg}</div> : null}
+      {modelsMsg ? <div className="form-ok">{modelsMsg}</div> : null}
 
       <div className="panel-foot">
         {"送出前會先拿這把金鑰去打供應商的「列模型」端點，驗不過就不會寫進任何地方。驗過之後排進佇列，主機端每分鐘處理一次。"}

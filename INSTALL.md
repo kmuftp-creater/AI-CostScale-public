@@ -549,6 +549,18 @@ curl -s http://127.0.0.1:4400/v1/chat/completions -H "Authorization: Bearer $(gr
 cd /opt/costscale && bash scripts/run-fx-fetch.sh
 ```
 
+**2026-11 版：訂閱模型選單、每日失效檢查**。沒有新的 SQL 檔，但要做三件事：
+
+1. `litellm-config.yaml` 是你自己的檔案，`git pull` 不會改它。把新版範本裡
+   「訂閱模型選單」那一段（`sub-claude-fable` 開始的 16 個部署）複製到你的設定檔，
+   再重啟閘道：`docker restart costscale-litellm-1`。
+2. 重啟家用主機上的橋接，讓它讀到新的 `bridge/server.js` 與 `bridge/model-check.js`。
+   失效通知要靠使用者環境變數 `COSTSCALE_VPS_SSH`（第 9 節已設定過就不用再設）。
+3. 到「應用程式」頁按一次「重新同步白名單」，已授權訂閱的軟體才會拿到新的模型名稱。
+
+**「重新同步白名單」的行為改了**：以前會把閘道上全部非訂閱模型開給每個軟體，
+現在保留各軟體目前勾選的模型，只拿掉已不存在的名字。新增的 API 模型要到該軟體的「模型」逐一勾選。
+
 ---
 
 ## 13. 打不通的時候
