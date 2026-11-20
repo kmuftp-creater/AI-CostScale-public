@@ -6,6 +6,7 @@ import AddUpstreamKeyClient from "./AddUpstreamKeyClient";
 import RemoveUpstreamKeyClient from "./RemoveUpstreamKeyClient";
 import RetargetModelClient, { type Candidate } from "./RetargetModelClient";
 import PriceModelClient from "./PriceModelClient";
+import ModelCatalogPanel from "@/components/ModelCatalogPanel";
 import { formatTokens, formatTaipei, sinceNow } from "@/lib/format";
 import { Fragment } from "react";
 import {
@@ -494,6 +495,11 @@ export default async function KeysPage() {
           </div>
         </section>
       )}
+
+      {/* ── 模型對照表（2026-11-20）───────────────────
+          放最上面：這一頁其他面板都以「模型名稱」為單位，
+          不先知道每個名稱是什麼，下面的數字讀不懂。 */}
+      <ModelCatalogPanel />
 
       {/* ── 免費額度 ─────────────────────────────────
           D-6（2026-08-25）：這裡原本是唯讀面板，編輯器在設定頁。

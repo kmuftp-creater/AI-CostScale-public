@@ -5,6 +5,7 @@ import {
   calibrateCreditPool,
   setCreditPoolWarn,
   addCreditGrant,
+  setCreditPoolEnabled,
 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest) {
   const guard = await requireSession();
   if (guard) return guard;
 
-  let body: { id?: number; action?: string; balance?: unknown; warn?: unknown; amount?: unknown; date?: string; note?: string };
+  let body: { id?: number; action?: string; balance?: unknown; warn?: unknown; amount?: unknown; date?: string; note?: string; enabled?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -67,5 +68,13 @@ export async function POST(request: NextRequest) {
     return ok ? NextResponse.json({ ok }) : NextResponse.json({ error: "寫入失敗" }, { status: 500 });
   }
 
-  return NextResponse.json({ error: "action 只能是 calibrate、warn、grant" }, { status: 400 });
+  if (body.action === "enable") {
+    if (typeof body.enabled !== "boolean") {
+      return NextResponse.json({ error: "enabled 要是 true 或 false" }, { status: 400 });
+    }
+    const ok = await setCreditPoolEnabled(id, body.enabled);
+    return ok ? NextResponse.json({ ok }) : NextResponse.json({ error: "寫入失敗" }, { status: 500 });
+  }
+
+  return NextResponse.json({ error: "action 只能是 calibrate、warn、grant、enable" }, { status: 400 });
 }

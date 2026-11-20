@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { listSubscriptions, listSubscriptionCharges, getFxRate, getSettings, getSubQuotaUsage } from "@/lib/db";
 import SubscriptionsClient from "./SubscriptionsClient";
 import FxSettingsClient from "./FxSettingsClient";
@@ -30,6 +31,13 @@ export default async function SubscriptionsPage() {
         fxDay={fxRate.day}
         fxStale={fxRate.stale}
       />
+
+      <section className="block tight">
+        <div className="panel-foot">
+          訂閱對應的模型名稱（<code>sub-</code> 開頭）列在{" "}
+          <Link href="/keys#models">金鑰管理 → 模型對照表</Link> 的「訂閱」那一組。
+        </div>
+      </section>
 
       {/* 匯率設定（D-6，2026-08-25 從設定頁搬來）。
           放頁尾是刻意的：這一頁上面每一個台幣金額都是它換算出來的，

@@ -110,6 +110,7 @@ export default function AppsClient({
   limits,
   modelSettings,
   gatewayModels,
+  modelNotes,
   fx,
   fxNote,
   gatewayUrl,
@@ -122,6 +123,11 @@ export default function AppsClient({
   modelSettings: Record<number, { allowed: string[]; defaultModel: string | null }>;
   /** 閘道上可選的非訂閱模型。訂閱通道走「訂閱橋接」面板，不在這裡選。 */
   gatewayModels: string[];
+  /**
+   * 名稱 → 一行說明（2026-11-20）。
+   * gemini-fast 這種名稱只有取名的人懂，所以每個選項旁邊都寫出實際模型、通道、計費。
+   */
+  modelNotes: Record<string, string>;
   /** 1 美元換多少台幣（含手續費）。畫面上所有台幣都用這個換。 */
   fx: number;
   fxNote: string;
@@ -699,6 +705,7 @@ export default function AppsClient({
                         }
                       />
                       <code>{m}</code>
+                      {modelNotes[m] ? <span className="model-note">{modelNotes[m]}</span> : null}
                     </label>
                   ))}
                 </Fragment>
@@ -720,7 +727,7 @@ export default function AppsClient({
                   <optgroup key={g.group} label={g.group}>
                     {g.items.map((m) => (
                       <option key={m} value={m}>
-                        {m}
+                        {modelNotes[m] ? `${m} — ${modelNotes[m]}` : m}
                       </option>
                     ))}
                   </optgroup>

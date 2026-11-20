@@ -56,3 +56,10 @@ COMMENT ON COLUMN costscale.credit_pools.anchor_day IS
   '錨點日。這一天（含）起 billing_daily 的抵免額會從錨點餘額扣掉。';
 COMMENT ON COLUMN costscale.credit_pool_grants.granted_on IS
   '贈金的開始日期（控制台「開始日期」欄）。早於錨點日的不計——已經含在錨點餘額裡。';
+
+-- 2026-11-20：這個帳單帳戶底下、閘道在用的 GCP 專案 ID（多個用逗號分隔）。
+-- 模型對照表靠它把 litellm-config.yaml 的 vertex_project 換成帳號名稱，
+-- 讓人看得出「這個模型的錢記在哪個帳號」。沒填就照舊顯示專案 ID。
+ALTER TABLE costscale.credit_pools ADD COLUMN IF NOT EXISTS gcp_project TEXT;
+COMMENT ON COLUMN costscale.credit_pools.gcp_project IS
+  '這個帳單帳戶底下、閘道在用的 GCP 專案 ID，多個用逗號分隔。模型對照表用。';

@@ -283,7 +283,8 @@ export default function AddUpstreamKeyClient({
           >
             {options.map((o) => (
               <option key={o.modelName} value={o.modelName}>
-                {o.modelName}（現有 {o.envNames.length} 把）
+                {o.modelName} — {o.backendModel.slice(o.backendModel.indexOf("/") + 1)} · {o.provider}（現有{" "}
+                {o.envNames.length} 把）
               </option>
             ))}
             <option value={NEW_GROUP}>＋ 開一個新的模型組（自己挑模型）</option>

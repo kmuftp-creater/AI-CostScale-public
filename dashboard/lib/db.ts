@@ -3997,6 +3997,8 @@ export type CreditPoolStatus = {
   anchorDay: string;
   warnBelowTwd: number;
   enabled: boolean;
+  /** 這個帳單帳戶底下、閘道在用的 GCP 專案 ID（逗號分隔）。模型對照表靠它把專案 ID 換成帳號名稱。 */
+  gcpProject: string | null;
   alertedAt: string | null;
   alertError: string | null;
   note: string | null;
@@ -4026,7 +4028,7 @@ export async function evaluateCreditPools(): Promise<CreditPoolStatus[]> {
     const pools = await client.query(
       `SELECT id, label, billing_source, console_url, anchor_balance_twd::float8 anchor,
               to_char(anchor_day, 'YYYY-MM-DD') anchor_day, warn_below_twd::float8 warn,
-              enabled, alerted_at, alert_error, note
+              enabled, gcp_project, alerted_at, alert_error, note
          FROM costscale.credit_pools ORDER BY id`
     );
     const out: CreditPoolStatus[] = [];
@@ -4077,6 +4079,7 @@ export async function evaluateCreditPools(): Promise<CreditPoolStatus[]> {
         anchorDay: p.anchor_day,
         warnBelowTwd: Number(p.warn),
         enabled: p.enabled,
+        gcpProject: p.gcp_project ?? null,
         alertedAt: p.alerted_at ? new Date(p.alerted_at).toISOString() : null,
         alertError: p.alert_error,
         note: p.note,
@@ -4134,6 +4137,77 @@ export async function setCreditPoolWarn(id: number, warnBelowTwd: number): Promi
   } catch (err) {
     console.warn("[db] setCreditPoolWarn failed:", err instanceof Error ? err.message : err);
     return false;
+  }
+}
+
+/**
+ * 停用或重新啟用一個贈金帳號的提醒（2026-11-20）。
+ *
+ * 起因：換帳號之後，舊帳號的餘額不會回升，紅色橫幅就永遠掛著。
+ * User：「都正常了，為何那條還要顯示」。停用只關掉橫幅與寄信，這一列與歷史數字都留著。
+ * 重新啟用時清掉 alerted_at，仍低於警示線的話下一輪檢查會再通知一次。
+ */
+export async function setCreditPoolEnabled(id: number, enabled: boolean): Promise<boolean> {
+  try {
+    const result = await getPool().query(
+      `UPDATE costscale.credit_pools
+          SET enabled = $2,
+              alerted_at = CASE WHEN $2 THEN NULL ELSE alerted_at END,
+              alert_error = CASE WHEN $2 THEN NULL ELSE alert_error END,
+              updated_at = now()
+        WHERE id = $1`,
+      [id, enabled]
+    );
+    return (result.rowCount ?? 0) > 0;
+  } catch (err) {
+    console.warn("[db] setCreditPoolEnabled failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
+/** GCP 專案 ID → 贈金帳號名稱。模型對照表用來把「gen-lang-client-…」換成人看得懂的帳號。 */
+export async function listCreditPoolProjects(): Promise<Record<string, string>> {
+  try {
+    const { rows } = await getPool().query(
+      `SELECT label, gcp_project FROM costscale.credit_pools WHERE gcp_project IS NOT NULL ORDER BY id`
+    );
+    const out: Record<string, string> = {};
+    for (const r of rows) {
+      for (const p of String(r.gcp_project).split(",").map((s) => s.trim()).filter(Boolean)) out[p] = r.label;
+    }
+    return out;
+  } catch (err) {
+    console.warn("[db] listCreditPoolProjects failed:", err instanceof Error ? err.message : err);
+    return {};
+  }
+}
+
+/**
+ * 每個模型名稱最近 N 天經閘道的成功與失敗次數。
+ *
+ * 模型對照表要這個：設定檔寫了不代表打得通（2026-11-20 實測，免費金鑰的
+ * gemini-3.8-flash 還在官方清單裡，但連打 20 次沒有一次成功）。查詢失敗回 null，不能當 0。
+ */
+export async function countCallsByModelGroup(
+  days = 7
+): Promise<Record<string, { ok: number; fail: number }> | null> {
+  try {
+    const { rows } = await getPool().query(
+      `SELECT model_group,
+              COUNT(*) FILTER (WHERE status = 'success')::int AS ok,
+              COUNT(*) FILTER (WHERE status IS DISTINCT FROM 'success')::int AS fail
+         FROM "LiteLLM_SpendLogs"
+        WHERE "startTime" >= now() - ($1 || ' days')::interval
+          AND model_group IS NOT NULL AND model_group <> ''
+        GROUP BY model_group`,
+      [String(days)]
+    );
+    const out: Record<string, { ok: number; fail: number }> = {};
+    for (const r of rows) out[r.model_group] = { ok: Number(r.ok), fail: Number(r.fail) };
+    return out;
+  } catch (err) {
+    console.warn("[db] countCallsByModelGroup failed:", err instanceof Error ? err.message : err);
+    return null;
   }
 }
 

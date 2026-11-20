@@ -68,7 +68,12 @@ export default function CreditPoolPanel({ pools }: { pools: CreditPoolStatus[] }
           <table className="ledger">
             <tbody>
               {pools.map((p) => (
-                <tr key={p.id} className={p.level === "low" || p.level === "empty" ? "row-flagged" : undefined}>
+                <tr
+                  key={p.id}
+                  className={
+                    !p.enabled ? "row-nodata" : p.level === "low" || p.level === "empty" ? "row-flagged" : undefined
+                  }
+                >
                   <td className="t-name">
                     {p.label}
                     <small>
@@ -89,7 +94,7 @@ export default function CreditPoolPanel({ pools }: { pools: CreditPoolStatus[] }
                         : ""}
                     </small>
                   </td>
-                  <td className="t-kind">{LEVEL_TEXT[p.level]}</td>
+                  <td className="t-kind">{p.enabled ? LEVEL_TEXT[p.level] : "〔已停用提醒〕"}</td>
                   <td className="t-amt">{twd(p.estimateTwd)}</td>
                   <td className="t-act">
                     {p.consoleUrl ? (
@@ -140,6 +145,28 @@ export default function CreditPoolPanel({ pools }: { pools: CreditPoolStatus[] }
                     >
                       警示線
                     </button>
+                    <button
+                      className="btn-ghost"
+                      type="button"
+                      disabled={busy === p.id}
+                      onClick={() => {
+                        if (p.enabled) {
+                          if (
+                            !confirm(
+                              `停用「${p.label}」的提醒？\n` +
+                                "停用後不再掛紅色橫幅、不再寄信；這一列和數字都會留著，之後可以重新啟用。\n" +
+                                "適用情況：已經換到別的帳號，這個帳號不再使用。"
+                            )
+                          )
+                            return;
+                          post(p.id, { action: "enable", enabled: false }, "已停用提醒，橫幅不會再出現");
+                        } else {
+                          post(p.id, { action: "enable", enabled: true }, "已重新啟用提醒");
+                        }
+                      }}
+                    >
+                      {p.enabled ? "停用提醒" : "重新啟用"}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -154,6 +181,7 @@ export default function CreditPoolPanel({ pools }: { pools: CreditPoolStatus[] }
           GCP 的帳單匯出只有「每天被抵掉多少」，沒有「還剩多少」，所以這裡是用某一天在控制台讀到的餘額往下扣出來的<strong>預估值</strong>。
           每月新發的贈金不會自動加進來——沒補記的話預估值會偏低，提醒只會提早、不會晚到。
           跌破警示線會寄一封信、全站掛紅色橫幅；校正或補記之後才會解除。
+          已經換到別的帳號、舊帳號不再使用時，按那一列的「停用提醒」，橫幅就不會再出現。
         </div>
       </div>
     </section>

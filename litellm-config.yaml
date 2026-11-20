@@ -17,7 +17,7 @@ model_list:
   # ══ 免費層：Google AI Studio 免費額度，5 把金鑰輪替 ══
   - model_name: gemini-flash-free
     litellm_params:
-      model: gemini/gemini-3.8-flash
+      model: gemini/gemini-3.1-flash-lite
       api_key: os.environ/GEMINI_FREE_KEY_1
       rpm: 10
     model_info:
@@ -25,7 +25,7 @@ model_list:
 
   - model_name: gemini-flash-free
     litellm_params:
-      model: gemini/gemini-3.8-flash
+      model: gemini/gemini-3.1-flash-lite
       api_key: os.environ/GEMINI_FREE_KEY_2
       rpm: 10
     model_info:
@@ -33,7 +33,7 @@ model_list:
 
   - model_name: gemini-flash-free
     litellm_params:
-      model: gemini/gemini-3.8-flash
+      model: gemini/gemini-3.1-flash-lite
       api_key: os.environ/GEMINI_FREE_KEY_3
       rpm: 10
     model_info:
@@ -41,7 +41,7 @@ model_list:
 
   - model_name: gemini-flash-free
     litellm_params:
-      model: gemini/gemini-3.8-flash
+      model: gemini/gemini-3.1-flash-lite
       api_key: os.environ/GEMINI_FREE_KEY_4
       rpm: 10
     model_info:
@@ -49,7 +49,7 @@ model_list:
 
   - model_name: gemini-flash-free
     litellm_params:
-      model: gemini/gemini-3.8-flash
+      model: gemini/gemini-3.1-flash-lite
       api_key: os.environ/GEMINI_FREE_KEY_5
       rpm: 10
     model_info:

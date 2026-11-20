@@ -2288,3 +2288,29 @@ td.t-act a.btn-ghost {
   font-weight: 700;
   white-space: nowrap;
 }
+
+/* 模型對照表（2026-11-20）。六欄，手機上放不下，外層橫向捲動、頁面本身不捲。 */
+.table-scroll { overflow-x: auto; }
+table.model-catalog { min-width: 760px; }
+table.model-catalog td { font-size: 0.86rem; }
+table.model-catalog td code { font-size: 0.82rem; }
+table.model-catalog tr.mc-group td {
+  padding: 1.1rem 0 0.35rem;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+table.model-catalog tr.mc-group td span {
+  margin-left: 0.9em;
+  letter-spacing: 0;
+  color: var(--muted);
+  font-family: var(--font-body, inherit);
+}
+table.model-catalog td.mc-free { color: var(--c-free); }
+table.model-catalog td.mc-subscription { color: var(--c-sub); }
+table.model-catalog td.mc-calls { color: var(--muted); white-space: nowrap; }
+table.model-catalog td.mc-bad { color: var(--crit); white-space: nowrap; }
+/* 勾選清單裡，名稱旁邊的一行說明 */
+.model-note { color: var(--muted); font-size: 0.78rem; }

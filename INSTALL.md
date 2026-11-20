@@ -496,6 +496,19 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db psql -
   不是幣別**——以台幣計價的海外服務（例如 OpenAI 的台灣訂價）帳單上照樣有那一行。
   非台幣計價的會自動填好；台幣計價的預設是「還沒確認」，等你對一次帳單再填。
 
+#### 2026-11-21 之後的版本：重新套一次 `34`
+
+`34-credit-pools.sql` 結尾多了一句，替「贈金餘額」加上 `gcp_project` 欄位。
+整支檔案可以重複執行，照上面的指令再套一次就好。**不套的話「GCP 帳單」頁的贈金餘額會變成空的、低餘額橫幅也不會出現**
+（程式會讀這個欄位，欄位不存在時整個查詢失敗）。
+
+套完之後，在資料庫把每個贈金帳號底下的 GCP 專案 ID 填進去（多個用逗號分隔），
+模型對照表的「付費帳號」才會顯示帳號名稱，而不是專案 ID：
+
+```
+UPDATE costscale.credit_pools SET gcp_project = '你的專案 ID' WHERE id = 1;
+```
+
 ### 升級閘道（LiteLLM）
 
 `docker-compose.yml` 把閘道**釘在特定的映像 digest**，不是 `main-stable` 這種會動的標籤。

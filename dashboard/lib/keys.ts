@@ -143,6 +143,9 @@ type ConfigEntry = {
   /** 設定檔自訂的單價，每百萬 token 美元。null＝沒設，用 LiteLLM 內建價目。 */
   inputPerMTok: number | null;
   outputPerMTok: number | null;
+  /** Vertex 部署記帳的 GCP 專案。不是 Vertex 就是 null。 */
+  vertexProject: string | null;
+  apiBase: string | null;
 };
 
 function pricingOf(v: unknown): PricingType {
@@ -200,6 +203,8 @@ async function readConfig(): Promise<{ entries: ConfigEntry[]; error: string | n
           isWildcard: modelName.includes("*") || backendModel.includes("*"),
           inputPerMTok: perM(info.input_cost_per_token ?? params.input_cost_per_token),
           outputPerMTok: perM(info.output_cost_per_token ?? params.output_cost_per_token),
+          vertexProject: typeof params.vertex_project === "string" ? params.vertex_project : null,
+          apiBase: typeof params.api_base === "string" ? params.api_base : null,
         });
       }
       return { entries, error: null };
@@ -223,6 +228,38 @@ export async function listConfigDeployments(): Promise<
   return entries
     .filter((e) => !e.isWildcard && e.backendModel)
     .map((e) => ({ modelName: e.modelName, backendModel: e.backendModel, envName: e.envName }));
+}
+
+export type ConfigCatalogEntry = {
+  modelName: string;
+  backendModel: string;
+  envName: string | null;
+  pricing: PricingType;
+  isWildcard: boolean;
+  vertexProject: string | null;
+  apiBase: string | null;
+};
+
+/**
+ * 設定檔裡的每一筆部署，含萬用規則、含記帳專案（2026-11-20，模型對照表用）。
+ * 同 listConfigDeployments：不問閘道、不查資料庫。
+ */
+export async function listConfigCatalog(): Promise<{ entries: ConfigCatalogEntry[]; error: string | null }> {
+  const { entries, error } = await readConfig();
+  return {
+    entries: entries
+      .filter((e) => e.backendModel)
+      .map((e) => ({
+        modelName: e.modelName,
+        backendModel: e.backendModel,
+        envName: e.envName,
+        pricing: e.pricing,
+        isWildcard: e.isWildcard,
+        vertexProject: e.vertexProject,
+        apiBase: e.apiBase,
+      })),
+    error,
+  };
 }
 
 // ── 閘道現場 ─────────────────────────────────────────────────────────

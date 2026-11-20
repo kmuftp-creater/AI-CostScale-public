@@ -12,6 +12,7 @@ import {
 import { listGatewayModelNames, DEFAULT_ALIAS } from "@/lib/litellm";
 import { resolveRange } from "@/lib/range";
 import AppsClient from "./AppsClient";
+import { getModelCatalog, notesOf } from "@/lib/model-catalog";
 import AppSubsClient from "./AppSubsClient";
 
 export const dynamic = "force-dynamic";
@@ -35,9 +36,13 @@ export default async function AppsPage({
 
   // 每個軟體的模型設定（2026-09-21）。真相在閘道那把金鑰上，這裡只是讀出來顯示。
   // 閘道連不上時 gatewayModels 會是空陣列，對話框就沒有東西可勾，而不是給一張錯的清單。
-  const [keySettings, gatewayModels] = await Promise.all([
+  const [keySettings, gatewayModels, modelNotes] = await Promise.all([
     getKeyModelSettings(apps.map((a) => a.vkey_id ?? "")),
     listGatewayModelNames().catch(() => [] as string[]),
+    // 每個名稱的一行說明（實際模型 · 通道 · 計費）。讀不到就是空的，選單照樣能用。
+    getModelCatalog()
+      .then(notesOf)
+      .catch(() => ({}) as Record<string, string>),
   ]);
   const modelSettings: Record<number, { allowed: string[]; defaultModel: string | null }> = {};
   for (const a of apps) {
@@ -109,6 +114,7 @@ export default async function AppsPage({
         limits={limits}
         modelSettings={modelSettings}
         gatewayModels={gatewayModels}
+        modelNotes={modelNotes}
         gatewayUrl={(process.env.GATEWAY_PUBLIC_URL ?? "https://llm.example.com").replace(/\/+$/, "")}
         fx={fx.rate}
         fxNote={`1 美元＝${fx.rate.toFixed(2)} 台幣（${fx.day ?? "手動設定"}${
