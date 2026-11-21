@@ -15,6 +15,16 @@
 兩個來源實測相差 0.08%，可以互為備援。主來源失敗才用備援，
 而且來源會寫進 fx_rates.source——換來源時匯率會有小跳動，
 沒有這欄的話下次會被當成資料錯誤查半天。
+
+**每小時跑一次，不是每天一次**（2026-11-21）。原本是每天 05:20 UTC（台北 13:20）跑一次，
+當天 13:20 之後才新增、而且扣款日就是今天的訂閱，那一期就永遠不會入帳——
+排程只看「今天」，明天再跑時已經不是扣款日了。實例：Google One 年訂閱
+11/21 下午新增，扣款歷史沒有 11/21 那筆。改成每小時跑，最多晚一小時入帳；
+凍結本來就是 ON CONFLICT DO NOTHING，重跑不會重複，也不會改寫已凍結的匯率。
+同一天的匯率只在第一次跑時去抓，之後沿用 fx_rates 裡那筆，不必每小時打外部 API。
+
+「今天」一律用台北時間。容器時區是 UTC，台北 00:00 到 08:00 在 UTC 還是前一天，
+每天只在 05:20 UTC 跑時剛好不會出事，改成每小時跑就會把扣款記到前一天。
 """
 import datetime
 import json
@@ -26,6 +36,8 @@ import urllib.request
 DSN = os.environ["DATABASE_URL"]
 BASE = "USD"
 QUOTE = "TWD"
+# 台灣沒有日光節約時間，固定 +8 就夠，不必依賴容器裡有沒有 tzdata。
+TAIPEI = datetime.timezone(datetime.timedelta(hours=8))
 
 PRIMARY_URL = "https://open.er-api.com/v6/latest/USD"
 FALLBACK_URL = ("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest"
@@ -55,17 +67,24 @@ def fetch_rate() -> tuple:
 def main() -> int:
     import psycopg
 
-    today = datetime.date.today()
-    rate, source = fetch_rate()
-    print("%s 匯率 1 %s = %.6f %s（來源 %s）" % (today, BASE, rate, QUOTE, source))
+    today = datetime.datetime.now(TAIPEI).date()
 
     with psycopg.connect(DSN) as conn, conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO costscale.fx_rates (day, base, quote, rate, source, fetched_at)
-            VALUES (%s, %s, %s, %s, %s, now())
-            ON CONFLICT (day, base, quote) DO UPDATE
-            SET rate = EXCLUDED.rate, source = EXCLUDED.source, fetched_at = now()
-        """, (today, BASE, QUOTE, round(rate, 6), source))
+        cur.execute("SELECT rate, source FROM costscale.fx_rates WHERE day = %s AND base = %s AND quote = %s",
+                    (today, BASE, QUOTE))
+        row = cur.fetchone()
+        if row:
+            rate, source = float(row[0]), row[1]
+            print("%s 匯率 1 %s = %.6f %s（沿用今天已抓的，來源 %s）" % (today, BASE, rate, QUOTE, source))
+        else:
+            rate, source = fetch_rate()
+            print("%s 匯率 1 %s = %.6f %s（來源 %s）" % (today, BASE, rate, QUOTE, source))
+            cur.execute("""
+                INSERT INTO costscale.fx_rates (day, base, quote, rate, source, fetched_at)
+                VALUES (%s, %s, %s, %s, %s, now())
+                ON CONFLICT (day, base, quote) DO UPDATE
+                SET rate = EXCLUDED.rate, source = EXCLUDED.source, fetched_at = now()
+            """, (today, BASE, QUOTE, round(rate, 6), source))
 
         cur.execute("SELECT value FROM costscale.settings WHERE key = 'fx_markup_pct'")
         row = cur.fetchone()

@@ -2563,8 +2563,9 @@ export async function listReminders(daysAhead = 7): Promise<Reminder[]> {
     // 訂閱自己的複查日（db/init/31）。與上面 apps 的那一條是兩回事：
     // 那條問「這個軟體還要不要繼續用付費 AI」，這條問「這筆訂閱的方案要不要改回去」。
     //
-    // **這個提醒有硬期限**：排程在扣款日當天 05:20 用當下的 fee 凍結，
-    // 過了那一刻才改，凍下去的金額就是錯的，而自動凍的那筆介面上刪不掉。
+    // **這個提醒有硬期限**：排程每小時跑（2026-11-21 起，原本每天 05:20 UTC），
+    // 扣款日當天台北 00:20 就會用當下的 fee 凍結。過了那一刻才改，
+    // 凍下去的金額就是錯的，而自動凍的那筆介面上刪不掉。
     // 所以 detail 要把扣款日一起講出來，光說「該複查了」沒有回答「什麼時候之前」。
     const { rows: subReviews } = await client.query(
       `SELECT service, plan, billing_day,

@@ -31,7 +31,11 @@ type Row = {
 };
 
 function nextBilling(row: Row): string {
+  // 用「今天 0 點」比，不是用現在這一刻比（2026-11-21）。
+  // 原本拿 now 比，扣款日當天 0 點 < now，就被當成已過、跳到下一期，
+  // 年訂閱在扣款日當天會顯示「365 天後」，看不出今天就是扣款日。
   const now = new Date();
+  now.setHours(0, 0, 0, 0);
   let next: Date;
   if (row.billing_cycle === "yearly") {
     const month = (row.billing_month ?? 1) - 1;
@@ -41,8 +45,8 @@ function nextBilling(row: Row): string {
     next = new Date(now.getFullYear(), now.getMonth(), row.billing_day);
     if (next < now) next.setMonth(next.getMonth() + 1);
   }
-  const days = Math.ceil((next.getTime() - now.getTime()) / 86400000);
-  return `${next.getMonth() + 1}/${next.getDate()}（${days} 天後）`;
+  const days = Math.round((next.getTime() - now.getTime()) / 86400000);
+  return `${next.getMonth() + 1}/${next.getDate()}（${days === 0 ? "今天" : `${days} 天後`}）`;
 }
 
 /**
@@ -965,7 +969,7 @@ export default function SubscriptionsClient({
           {charges.length === 0 ? (
             <div className="empty-state">
               <span className="microlabel">Empty</span>
-              {"還沒有任何已發生的扣款紀錄。每天早上抓匯率時會檢查有沒有訂閱在當天扣款，" +
+              {"還沒有任何已發生的扣款紀錄。排程每小時會檢查有沒有訂閱在當天扣款，" +
                 "有的話就把當天的匯率連同金額一起凍結寫進這裡，之後不再重算。" +
                 "第一筆會在最近一個扣款日出現。月中升級補的差額不會自己出現，用右上角的「補一筆」記進來。"}
             </div>

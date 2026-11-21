@@ -266,8 +266,9 @@ sudo certbot --nginx -d cost.example.com -d llm.example.com
 */3 * * * * /opt/costscale/scripts/watchdog-litellm.sh
 # 預算檢查：超過或接近每月預算時寫告警、寄信
 5 * * * * /opt/costscale/scripts/check-budgets.sh >> /var/log/costscale-budgets.log 2>&1
-# 匯率（台幣顯示用）與訂閱月費入帳
-20 5 * * * /opt/costscale/scripts/run-fx-fetch.sh >> /var/log/costscale-fx.log 2>&1
+# 匯率（台幣顯示用）與訂閱月費入帳。每小時跑：扣款日當天才新增的訂閱，最晚一小時內入帳。
+# 匯率每天只抓一次，同一天重跑不會重複入帳
+20 * * * * /opt/costscale/scripts/run-fx-fetch.sh >> /var/log/costscale-fx.log 2>&1
 # 訂閱剩餘額度（有裝訂閱橋接才需要）
 */15 * * * * /opt/costscale/scripts/run-sub-usage-fetch.sh >> /var/log/costscale-sub-usage.log 2>&1
 # 專案看板同步 GitHub（有用看板才需要）
@@ -495,6 +496,13 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db psql -
 - **訂閱的「海外交易」**：決定收不收國外交易服務費。**它看的是收單商家在不在海外，
   不是幣別**——以台幣計價的海外服務（例如 OpenAI 的台灣訂價）帳單上照樣有那一行。
   非台幣計價的會自動填好；台幣計價的預設是「還沒確認」，等你對一次帳單再填。
+
+#### 2026-11-22 之後的版本：匯率排程改每小時
+
+以前裝的是每天跑一次（`20 5 * * *`），扣款日當天、排程跑過之後才新增的訂閱，
+那一期永遠不會進「扣款歷史」。更新程式後，用 `crontab -e` 把 `run-fx-fetch.sh` 那一行
+開頭的 `20 5 * * *` 改成 `20 * * * *`。新版腳本用台北時間判斷「今天」，
+沒改排程也能照常運作，只是補不到當天晚新增的訂閱。
 
 #### 2026-11-21 之後的版本：重新套一次 `34`
 
