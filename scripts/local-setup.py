@@ -250,8 +250,10 @@ def save_env(env):
 
 # ───────────────────────── 尾碼表（給儀表板看的）─────────────────────────
 
-# 儀表板容器的執行身分（dashboard/Dockerfile：nextjs，uid／gid 1001）。尾碼表只給它讀。
-DASHBOARD_GID = 1001
+# 儀表板容器的執行身分（dashboard/Dockerfile：使用者 nextjs，uid 1001；alpine 的 adduser --system 把它的主要群組設成 nogroup，gid 65533）。
+# 尾碼表只給它讀。
+DASHBOARD_UID = 1001
+DASHBOARD_GID = 65533
 # 不寫進尾碼表的憑證：訂閱橋接 token 不是供應商金鑰。（閘道主金鑰本來就不是 api_key 欄位，不會被收。）
 TAILS_EXCLUDE = {"BRIDGE_TOKEN", "LITELLM_MASTER_KEY"}
 
@@ -262,12 +264,56 @@ def tail_names(config_text):
     return names - TAILS_EXCLUDE
 
 
+def dashboard_can_read(path):
+    """以儀表板容器的身分（uid 1001、gid 65533）實際開一次檔案，確認它讀得到。無法切換身分時回 False。"""
+    try:
+        old_uid, old_gid = os.geteuid(), os.getegid()
+        os.setegid(DASHBOARD_GID)
+        os.seteuid(DASHBOARD_UID)
+    except (AttributeError, OSError):
+        return False
+    try:
+        with open(path, "rb") as f:
+            f.read(1)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.seteuid(old_uid)
+        os.setegid(old_gid)
+
+
+def tighten_tails(path):
+    """把尾碼表的權限收緊到「只有儀表板與專案資料夾的群組讀得到」；檔案系統不支援就退回所有人可讀。
+
+    先試：擁有者設為儀表板（uid 1001）、群組設為專案資料夾的群組、權限 640。
+    再用儀表板的身分實際開一次檔案；開不了（例如 Docker Desktop 的共享資料夾不認得 uid、gid，
+    權限位元照字面套用，640 會讓儀表板讀不到），就把擁有者還給專案資料夾的擁有者並改回 644。
+    """
+    own = owner_of_work()
+    try:
+        os.chown(path, DASHBOARD_UID, own[1] if own else -1)
+        os.chmod(path, 0o640)
+    except (OSError, AttributeError):
+        pass
+    if dashboard_can_read(path):
+        return "640"
+    try:
+        os.chown(path, own[0] if own else -1, own[1] if own else -1)
+    except (OSError, AttributeError):
+        pass
+    try:
+        os.chmod(path, 0o644)
+    except OSError:
+        pass
+    return "644"
+
+
 def write_tails(env):
     """寫 spool/upstream-keys/_tails.json：每把供應商金鑰的「尾 4 碼」。格式與 apply-upstream-key.py 相同。
 
     只收設定檔裡 api_key 引用的供應商金鑰；LITELLM_MASTER_KEY、BRIDGE_TOKEN 不收（驗收 L-05）。
-    檔案權限 640：擁有者（專案資料夾的擁有者）可讀寫，群組設為儀表板容器的 gid（1001）可讀，其他人不能讀。
-    改群組失敗（例如檔案系統不支援）時退回 644，確保儀表板讀得到。
+    權限盡量收緊，做法見 tighten_tails。
     """
     names = set()
     try:
@@ -286,14 +332,7 @@ def write_tails(env):
             pass
     p = os.path.join(SPOOL_DIR, "_tails.json")
     atomic_write(p, json.dumps({"tails": tails, "at": datetime.now().astimezone().isoformat()}), 0o640)
-    own = owner_of_work()
-    try:
-        os.chown(p, own[0] if own else -1, DASHBOARD_GID)
-    except (OSError, AttributeError):
-        try:
-            os.chmod(p, 0o644)
-        except OSError:
-            pass
+    tighten_tails(p)
 
 
 # ───────────────────────── 問答 ─────────────────────────
