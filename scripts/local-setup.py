@@ -445,7 +445,7 @@ def put_key(env, provider, key, report):
     for slot in slots:
         if secret_unset(env.get(slot)) or not env.has(slot):
             env.set(slot, key)
-            report.append("%s 的金鑰已放進 %s（尾碼 %s）" % (label, slot, key[-4:]))
+            report.append("%s 的金鑰已放進 %s" % (label, slot))
             return True
     report.append(
         "%s 的欄位（%s）都已經有金鑰，這次沒有寫入。要換掉其中一把：用文字編輯器打開 .env，把那一行等號後面換成新金鑰。"
@@ -476,8 +476,9 @@ def action_init(env, is_new):
     if is_new:
         say("還沒有 .env，開始建立。亂數祕密（資料庫密碼、閘道主金鑰、登入加密密鑰等）會自動產生，不會顯示在畫面上。")
         env = read_example()
-        # 範本裡沒有的值不能留著範本預設
-        fill_random_fields(env, report)
+        # 範本裡的祕密欄位都是公開的預設值，一律換成新的亂數
+        fill_random_fields(env, [])
+        report.append("已產生 6 個亂數祕密（資料庫密碼、閘道主金鑰、登入加密密鑰、排程與回報用的 token），不會顯示在畫面上")
         ports = collect_ports(env, interactive_ask=False)
         set_urls(env, ports, report, force=True)
         env.set("AUTH_DISABLED", "0")
@@ -486,7 +487,8 @@ def action_init(env, is_new):
         password = get_admin_password(pw_env)
         put_admin(env, user, password, report)
         del password
-        set_local_fields(env, ports, report, only_missing=False)
+        set_local_fields(env, ports, [], only_missing=False)
+        report.append("本機模式欄位已寫入（COSTSCALE_MODE=local，儀表板埠 %d、閘道埠 %d、資料庫埠 %d）" % (ports["DASH_PORT"], ports["GATEWAY_PORT"], ports["DB_PORT"]))
         keys_added = keys_from_environment(env, report)
         if INTERACTIVE and keys_added == 0:
             say("")
