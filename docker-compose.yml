@@ -69,6 +69,11 @@ services:
       STORE_MODEL_IN_DB: "False"
     volumes:
       - ./litellm-config.yaml:/app/config.yaml:ro
+      - ./scripts/litellm-entry.py:/app/cs-entry.py:ro
+    # 進入點換成 scripts/litellm-entry.py：啟動前把「金鑰還是佔位值」的重複部署從暫存設定檔拿掉
+    # （只填 1 把 Gemini 金鑰時，另外 4 個佔位部署會讓呼叫隨機失敗）。原設定檔不動。
+    # 填滿所有金鑰時沒有任何部署被拿掉，行為與映像預設的進入點相同。
+    entrypoint: ["python", "/app/cs-entry.py"]
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     extra_hosts:
       - "host.docker.internal:host-gateway"

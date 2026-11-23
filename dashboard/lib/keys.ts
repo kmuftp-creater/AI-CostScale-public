@@ -25,6 +25,7 @@ import { listQuotaPools, type QuotaPoolStatus } from "@/lib/db";
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { getPool } from "@/lib/db";
+import { PLACEHOLDER_KEY_TAIL, skippedPlaceholderIndexes } from "@/lib/placeholder-pool";
 
 const CONFIG_CANDIDATES = [
   process.env.LITELLM_CONFIG_PATH,
@@ -398,11 +399,16 @@ function globMatches(pattern: string, value: string): boolean {
 
 export async function getKeyInventory(): Promise<KeyInventory> {
   const checkedAt = new Date();
-  const [{ entries, error: configError }, { live, error: gatewayError }, usage] = await Promise.all([
+  const [{ entries, error: configError }, { live, error: gatewayError }, usage, tails] = await Promise.all([
     readConfig(),
     readGateway(),
     getUsageByDeployment(),
+    readTails(),
   ]);
+  // 閘道啟動時（scripts/litellm-entry.py）已把「金鑰是佔位值、同組還有真金鑰」的部署拿掉，
+  // 這裡用同一條規則預先算出來，對照第 N 筆時跳過它們，不然後面的部署會對錯位。
+  // 尾碼表查不到的金鑰一律不跳過（查不到就不假設）。
+  const skipped = skippedPlaceholderIndexes(entries, (env) => tails[env] === PLACEHOLDER_KEY_TAIL);
 
   // 同名 model_name 底下的線上部署，維持閘道回傳的順序。
   const liveByName = new Map<string, LiveDeployment[]>();
@@ -415,10 +421,15 @@ export async function getKeyInventory(): Promise<KeyInventory> {
 
   // 第一輪：非萬用字元的設定，依 yaml 順序對到閘道同名部署的第 N 筆。
   const cursor = new Map<string, number>();
-  const resolved: { entry: ConfigEntry; id: string | null }[] = [];
-  for (const e of entries) {
+  const resolved: { entry: ConfigEntry; id: string | null; notLoadedByDesign?: boolean }[] = [];
+  for (const [entryIdx, e] of entries.entries()) {
     if (e.isWildcard) {
       resolved.push({ entry: e, id: null });
+      continue;
+    }
+    if (skipped.has(entryIdx)) {
+      // 金鑰還是佔位值，閘道刻意沒載入。不佔用閘道部署的順位，也不算「設定檔與線上不一致」。
+      resolved.push({ entry: e, id: null, notLoadedByDesign: true });
       continue;
     }
     const arr = liveByName.get(e.modelName) ?? [];
@@ -481,7 +492,7 @@ export async function getKeyInventory(): Promise<KeyInventory> {
         pricing: e.pricing,
       });
       if (r.id) cur.ids.add(r.id);
-      else unloaded += 1;
+      else if (!r.notLoadedByDesign) unloaded += 1;
     }
     // 同一把金鑰若橫跨不同計價型態（不該發生），保守取較貴的那個。
     if (cur.pricing !== e.pricing && e.pricing === "payg") cur.pricing = "payg";
@@ -565,7 +576,6 @@ export async function getKeyInventory(): Promise<KeyInventory> {
   const order: Record<PricingType, number> = { free: 0, subscription: 1, payg: 2, unknown: 3 };
   keys.sort((a, b) => order[a.pricing] - order[b.pricing] || a.envName.localeCompare(b.envName));
 
-  const tails = await readTails();
   for (const k of keys) k.tail = tails[k.envName] ?? null;
 
   return {
