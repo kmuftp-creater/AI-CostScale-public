@@ -108,6 +108,8 @@ docker compose up -d --build
 
 之後開瀏覽器到 `http://localhost:3000`，用步驟 2 設定的帳號密碼登入。
 
+設定工具建立 `.env` 時，已經替你挑好一個不常撞的 Docker 網段（隨機的私有 `/24`，寫在 `.env` 的 `COSTSCALE_SUBNET` 與 `COSTSCALE_GATEWAY`），避開 Docker 與家用路由器常用的範圍。萬一啟動時還是報 `Pool overlaps`（網段撞到這台電腦上別的 Docker 網路），重新執行設定工具、選 `6) 換一個網段`，再依畫面提示執行 `docker compose down` 與 `docker compose up -d` 即可，不需要自己查哪個網路佔用了哪個網段。
+
 ### 怎麼確認成功
 
 1. 執行 `docker compose ps`。要看到四個服務都在執行：`db`、`litellm`、`dashboard`、`scheduler`，其中 `db` 與 `litellm` 的狀態要顯示 `(healthy)`。閘道第一次啟動約需 30 秒到 1 分鐘，剛啟動時顯示 `(health: starting)` 是正常的。
@@ -121,19 +123,27 @@ docker compose up -d --build
    要看到 `[匯率] 成功` 與（啟動約 2 分鐘後）`[預算] 成功` 各一行。
 4. 第 2、3 步照第 8 節做：在「應用程式」新增軟體取得虛擬金鑰，再打一次呼叫。網址換成 `http://localhost:4000`：
 
-   PowerShell：
+   Windows PowerShell（整段貼上，會直接印出回答文字）：
 
    ```powershell
-   Invoke-RestMethod http://localhost:4000/v1/chat/completions -Method Post -Headers @{Authorization="Bearer sk-你的虛擬金鑰"} -ContentType "application/json" -Body '{"model":"gemini-flash-free","messages":[{"role":"user","content":"用一句話自我介紹"}]}'
+   $body = '{"model":"gemini-flash-free","messages":[{"role":"user","content":"用一句話自我介紹"}]}'
+   $f = New-TemporaryFile
+   Invoke-RestMethod -Uri "http://localhost:4000/v1/chat/completions" -Method Post -Headers @{ Authorization = "Bearer sk-你的虛擬金鑰" } -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -OutFile $f
+   (Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json).choices[0].message.content
+   Remove-Item $f
    ```
 
-   Mac、Linux：
+   為什麼比 `curl` 長：PowerShell 裡的 `curl` 是另一個指令（`Invoke-WebRequest` 的別名），bash 的 `-H` 寫法會報 `Cannot bind parameter 'Headers'`。內容改用 UTF-8 位元組送出，中文才不會變亂碼；回應先存成暫存檔再用 UTF-8 讀回，是因為 Windows PowerShell 5.1 會把沒有標示字元集的回應當成 Latin-1 解碼，中文回答會變成亂碼。
+
+   macOS、Linux（Windows 的 Git Bash 也可以）：
 
    ```bash
-   curl -s http://localhost:4000/v1/chat/completions -H "Authorization: Bearer sk-你的虛擬金鑰" -H "Content-Type: application/json" -d '{"model":"gemini-flash-free","messages":[{"role":"user","content":"用一句話自我介紹"}]}'
+   curl -s http://localhost:4000/v1/chat/completions -H "Authorization: Bearer sk-你的虛擬金鑰" -H "Content-Type: application/json" -d '{"model":"gemini-flash-free","messages":[{"role":"user","content":"Introduce yourself in one sentence, in Traditional Chinese."}]}'
    ```
 
-   Gemini 免費額度的上游偶爾回 `503`（`high demand`），過幾秒再打一次即可。另外 `gemini-flash-free` 是 5 把金鑰輪替，只放了一把時，其他 4 個欄位還是佔位字，輪到它們會回 `401`，閘道會自動重試 2 次；仍然失敗就再打一次。
+   這一行的內容刻意用英文：Git Bash 把含中文的指令列轉給 `curl` 時編碼會壞掉，閘道會回 `400`（`Missing required parameter: messages`）。英文內容加上「用繁體中文回答」，回答照樣是中文。
+
+   Gemini 免費額度的上游偶爾回 `503`（`high demand`），過幾秒再打一次即可。`gemini-flash-free` 設定檔裡有 5 個部署（對應 `GEMINI_FREE_KEY_1` 到 `5`）：閘道啟動時只載入「已經填了真金鑰」的部署，所以只放一把金鑰也不會輪到佔位字而回 `401`。之後補上第 2 把金鑰時（見下方「加 AI 金鑰」），閘道重建後會自動把第 2 個部署加進輪替。
 
    在 Docker 容器裡跑的專案，網址用 `http://host.docker.internal:4000`（Docker Desktop；Linux 要替那個容器加 `--add-host=host.docker.internal:host-gateway`）。
 
@@ -153,6 +163,28 @@ docker compose up -d
 
 設定工具不會先向供應商驗證金鑰。要確認金鑰有效，到「金鑰管理」頁看新金鑰有沒有出現尾 4 碼，再照上面第 4 點打一次呼叫。
 
+只放一把金鑰就能用；要放第 2 把，照上面做一次（選 `2) 新增 AI 金鑰`，再 `docker compose up -d`）。閘道每次啟動時，只載入「金鑰不是佔位字」的部署：Gemini 免費額度與 Groq 這種多把金鑰輪替的模型，填了幾把就輪替幾把，填滿 5 把（Groq 是 3 把）時所有部署都載入，行為與一般輪替完全相同。重建後閘道的紀錄（`docker compose logs litellm`）會有一行 `[cs-entry]`，說明哪幾個欄位還是佔位字、因此沒有載入。
+
+### 移除一把金鑰
+
+重新執行設定工具，選 `3) 移除 AI 金鑰`，選要移除的那一把。工具把那一欄改回 `placeholder`（範本的原樣），並更新尾碼表。然後執行：
+
+```
+docker compose up -d
+```
+
+閘道重建後不再使用那把金鑰，儀表板「金鑰管理」頁的尾碼也會跟著消失。要讓那把金鑰真正作廢，還要到供應商的後台（例如 Google AI Studio）把它停用或刪除，設定工具做不到這件事。
+
+不問問題的做法（欄位名見 `.env`，例如 `GEMINI_FREE_KEY_2`）：
+
+```powershell
+$env:CS_ACTION = "remove-key"; $env:CS_REMOVE_KEY = "GEMINI_FREE_KEY_2"
+docker compose -f docker-compose.setup.yml run --rm setup
+Remove-Item Env:CS_ACTION, Env:CS_REMOVE_KEY
+```
+
+手動改 `.env`（把那一行等號後面改回 `placeholder`）也可以，但改完要再執行一次設定工具（選 `1`）才會更新尾碼表，不然儀表板還會顯示舊的尾碼。
+
 ### 怎麼改密碼
 
 不需要 bash，一樣用設定工具：
@@ -161,7 +193,7 @@ docker compose up -d
 docker compose -f docker-compose.setup.yml run --rm setup
 ```
 
-選 `3) 更改管理員帳號或密碼`，照畫面輸入。然後執行這一行，只重建儀表板：
+選 `4) 更改管理員帳號或密碼`，照畫面輸入。然後執行這一行，只重建儀表板：
 
 ```
 docker compose up -d dashboard
@@ -173,7 +205,7 @@ docker compose up -d dashboard
 
 已經有 `.env` 時，設定工具**不會覆蓋**它：
 
-- 互動執行會先顯示選單（補齊缺少的欄位、新增 AI 金鑰、更改管理員帳號或密碼、更改埠號）。
+- 互動執行會先顯示選單（補齊缺少的欄位、新增 AI 金鑰、移除 AI 金鑰、更改管理員帳號或密碼、更改埠號、換一個網段）。
 - 非互動執行（沒有終端機，或加 `-T`）只做「補齊缺少的欄位」：缺的欄位用預設值補上，還是範本值的祕密換成新的亂數，`AUTH_DISABLED` 不是 `0` 就改回 `0`，已有的值一律不動。什麼都不用補時，`.env` 的內容完全不變。
 
 不問問題、直接用環境變數提供答案（缺少必要的值會報錯結束）：
@@ -184,7 +216,9 @@ docker compose up -d dashboard
 | `CS_ADMIN_PASSWORD` | 管理員密碼。第一次設定必填 |
 | `CS_GEMINI_FREE_KEY`、`CS_GROQ_KEY`、`CS_OPENROUTER_KEY`、`CS_GEMINI_PAID_KEY` | 各家的 AI 金鑰，可省略 |
 | `CS_DASH_PORT`、`CS_GATEWAY_PORT`、`CS_DB_PORT` | 三個埠，省略時用 3000、4000、5442 |
-| `CS_ACTION` | `init`（預設）、`add-key`、`password`、`ports`，對應選單的四個選項 |
+| `CS_REMOVE_KEY` | `remove-key` 要移除的金鑰欄位名，例如 `GEMINI_FREE_KEY_2` |
+| `CS_SUBNET` | `subnet` 要換成的 Docker 網段，要是私有網段的 `/24`，例如 `10.97.45.0/24`；沒給就隨機挑一個 |
+| `CS_ACTION` | `init`（預設）、`add-key`、`remove-key`、`password`、`ports`、`subnet`，對應選單的選項 |
 
 PowerShell 範例（用完把密碼從環境變數移除；不要把密碼直接寫在指令列，會留在歷史紀錄）：
 
@@ -201,6 +235,30 @@ read -rs CS_ADMIN_PASSWORD && export CS_ADMIN_PASSWORD
 docker compose -f docker-compose.setup.yml run --rm setup
 unset CS_ADMIN_PASSWORD
 ```
+
+其他環境變數（不含密碼的那幾個）在 PowerShell 與 bash 的寫法不同，下面以「把閘道埠改成 14000」為例。PowerShell：
+
+```powershell
+$env:CS_ACTION = "ports"; $env:CS_GATEWAY_PORT = "14000"
+docker compose -f docker-compose.setup.yml run --rm setup
+Remove-Item Env:CS_ACTION, Env:CS_GATEWAY_PORT
+```
+
+Mac、Linux 與 Git Bash：
+
+```bash
+CS_ACTION=ports CS_GATEWAY_PORT=14000 docker compose -f docker-compose.setup.yml run --rm setup
+```
+
+Windows 的 cmd（命令提示字元）：
+
+```
+set CS_ACTION=ports
+set CS_GATEWAY_PORT=14000
+docker compose -f docker-compose.setup.yml run --rm setup
+```
+
+在 Git Bash 這類沒有終端機（TTY）的環境直接執行 `run --rm setup`，工具會把自己當成非互動執行，問不了問題，只會說缺少環境變數。想邊問邊答，請改在 PowerShell 或終端機執行。
 
 ### 更新到新版
 
@@ -260,20 +318,23 @@ docker compose down -v --rmi local
 - **儀表板不能直接新增、移除上游金鑰，也不能改模型單價與模型對應。**這些操作要由主機端排程套用，要操作 Docker，本機模式不提供。加金鑰用上面的設定工具；改模型設定要編輯 `litellm-config.yaml` 後執行 `docker compose restart litellm`。「金鑰管理」頁的「可用模型」清單由主機排程每 6 小時抓一次，本機模式沒有這支排程，那一欄會一直顯示尚未抓取。
 - **登入鎖定是全站共用一組。**本機沒有 nginx，儀表板不信任 `X-Forwarded-For`，所有來源算同一個。連續輸錯 5 次，整個登入鎖 15 分鐘（含你自己）。要立刻解除：`docker compose up -d --force-recreate dashboard`。
 - **這些選用功能不在本機模式的範圍，沒有測試過：**訂閱橋接（第 9 節）、訂閱用量收集器（第 10 節）、專案看板（第 11 節）、Vertex AI、GCP 用量與帳單抓取。它們需要的主機路徑（`/root/vertex-sa.json`）、SSH 隧道、cron 排程在本機模式都沒有準備，儀表板上對應的區塊會顯示「沒有資料」。
-- **排程只有兩支：**匯率與訂閱月費入帳、預算檢查，各每小時一次，由 `scheduler` 容器執行（紀錄用 `docker compose logs scheduler` 看）。電腦關機期間不執行，開機後補跑一次。預算超標的告警會顯示在儀表板橫幅；要收告警信，在 `.env` 填 `ALERT_EMAIL_TO` 與 `SMTP_*`，再執行 `docker compose up -d`。
-- **網路網段固定為 `10.87.213.0/24`**（雲端主機模式的訂閱橋接需要它）。本機模式沒有橋接，與別的網路衝突時可以改，見常見問題。
+- **排程只有兩支：**匯率與訂閱月費入帳、預算檢查，各每小時一次，由 `scheduler` 容器執行（紀錄用 `docker compose logs scheduler` 看）。電腦關機期間不執行，開機後補跑一次；電腦睡眠期間也不執行，醒來後立刻補跑一次（排程用「牆上時間」判斷到期，用假時鐘驗證過：睡 8 小時醒來每支只補跑一次。假設 Docker Desktop 會在電腦醒來後把虛擬機的時鐘校正，真的讓電腦睡眠再醒來這一點沒有實機測過）。預算超標的告警會顯示在儀表板橫幅；要收告警信，在 `.env` 填 `ALERT_EMAIL_TO` 與 `SMTP_*`，再執行 `docker compose up -d`。
+- **網路網段由設定工具在建立 `.env` 時隨機挑一個私有 `/24`**（寫在 `COSTSCALE_SUBNET`，避開 `172.16` 到 `172.31`、`192.168.0`、`192.168.1`、`10.0.0`）。更早建立的 `.env` 沒有這兩個欄位，沿用預設的 `10.87.213.0/24`（雲端主機模式的訂閱橋接需要它）。撞到別的網路時，重新執行設定工具選 `6) 換一個網段`，見常見問題。
+- **排程容器每次啟動要從 PyPI 安裝 `psycopg`（固定為 3.3.9 版）。**離線時安裝會失敗，每 15 秒重試一次，排程在連上網路之前不會執行。
 
 ### 常見問題
 
 | 現象 | 原因 | 怎麼辦 |
 |---|---|---|
 | 執行任何 `docker` 指令都報連不上 Docker。Windows 實測的訊息開頭是 `failed to connect to the docker API at npipe:...; check if the path is correct and if the daemon is running`；Mac、Linux 沒有實測，訊息文字不同（例如 `Cannot connect to the Docker daemon`），意思相同 | Docker Desktop 沒開，或還在啟動 | 打開 Docker Desktop，等到顯示引擎執行中，再重新執行同一行指令 |
-| 啟動時報 `Error response from daemon: failed to set up container networking: ... Bind for 127.0.0.1:4000 failed: port is already allocated`（實測：4000 被另一個 Docker 容器佔用時的原文；被 Docker 以外的程式佔用時，結尾的原因文字不同，但一樣有 `Bind for 127.0.0.1:埠號 failed`） | 訊息裡那個埠（這裡是 4000；儀表板是 3000、資料庫是 5442）已經被這台電腦上的另一個程式佔用。這時其他服務照常起來，只有那一個服務停在 `Created`（沒有啟動） | 執行設定工具，選 `4) 更改埠號`，把被佔用的那個改成沒人用的（例如閘道改 14000），再 `docker compose up -d`，那個服務就會起來。非互動做法：`CS_ACTION=ports` 加 `CS_GATEWAY_PORT=14000`。設定工具會一併更新 `.env` 裡的 `AUTH_URL` 與 `GATEWAY_PUBLIC_URL` |
-| 啟動時報 `failed to create network costscale_default: Error response from daemon: invalid pool request: Pool overlaps with other one on this address space` | 另一個 Docker 網路（例如先前裝過的 AI CostScale，即使它的容器已經停止）佔用了 `10.87.213.0/24` | 用文字編輯器打開 `.env`，加兩行：`COSTSCALE_SUBNET=10.87.214.0/24` 與 `COSTSCALE_GATEWAY=10.87.214.1`（網段換成沒被用的），再 `docker compose up -d`。要先看有哪些網段已被用：`docker network ls`，再對每個網路執行 `docker network inspect 網路名稱` |
+| 啟動時報 `Error response from daemon: failed to set up container networking: ... Bind for 127.0.0.1:4000 failed: port is already allocated`（實測：4000 被另一個 Docker 容器佔用時的原文；被 Docker 以外的程式佔用時，結尾的原因文字不同，但一樣有 `Bind for 127.0.0.1:埠號 failed`） | 訊息裡那個埠（這裡是 4000；儀表板是 3000、資料庫是 5442）已經被這台電腦上的另一個程式佔用。這時其他服務照常起來，只有那一個服務停在 `Created`（沒有啟動） | 執行設定工具，選 `5) 更改埠號`，把被佔用的那個改成沒人用的（例如閘道改 14000），再 `docker compose up -d`，那個服務就會起來。非互動做法：把環境變數 `CS_ACTION` 設成 `ports`、`CS_GATEWAY_PORT` 設成 `14000`（PowerShell、bash、cmd 的寫法見上方「設定工具的進階用法」）。設定工具會一併更新 `.env` 裡的 `AUTH_URL` 與 `GATEWAY_PUBLIC_URL` |
+| 啟動時報 `failed to create network costscale_default: Error response from daemon: invalid pool request: Pool overlaps with other one on this address space` | 另一個 Docker 網路（例如先前裝過的 AI CostScale，即使它的容器已經停止）佔用了 `10.87.213.0/24` | 重新執行設定工具，選 `6) 換一個網段`（它會隨機挑一個新的私有網段），再依序執行 `docker compose down` 與 `docker compose up -d`（`down` 不加 `-v`，資料都保留）。不想互動的話：把環境變數 `CS_ACTION` 設成 `subnet`，執行同一支設定工具；要指定網段再多設 `CS_SUBNET`（例如 `10.97.45.0/24`）。不需要自己查哪個網路佔用了哪個網段 |
 | 建置時出現 `font/google` 之類的錯誤 | 建置儀表板時要連 `fonts.googleapis.com` 下載字型，網路暫時不通 | 建置步驟已自動重試 3 次；仍失敗就等網路恢復，重新執行同一行 `docker compose up -d --build`，不會從頭來過 |
 | 打開 `http://localhost:3000` 沒有回應 | 儀表板還在啟動，或 Docker 沒開 | 等 30 秒；執行 `docker compose ps` 與 `docker compose logs dashboard` 看狀態 |
 | 登入頁寫「登入功能已停用：AUTH_SECRET 還沒設好」 | `.env` 的 `AUTH_SECRET` 是空值、範本預設值或短於 32 個字元 | 重新執行設定工具（選 `1`），它會補上新的亂數，再 `docker compose up -d dashboard` |
-| 登入頁寫「還沒有設定任何登入方式」 | `.env` 沒有管理員帳號或雜湊 | 執行設定工具選 `3`，再 `docker compose up -d dashboard` |
+| 登入頁寫「還沒有設定任何登入方式」 | `.env` 沒有管理員帳號或雜湊 | 執行設定工具選 `4`，再 `docker compose up -d dashboard` |
+| 每一頁最上方有紅框橫幅「登入檢查已關閉」 | `.env` 的 `AUTH_DISABLED` 是 `1`，任何連得到儀表板的人都不用密碼就能看花費、發金鑰 | 把 `AUTH_DISABLED` 改成 `0`，再 `docker compose up -d dashboard`；執行設定工具選 `1` 也會把它改回 `0` |
+| 每一頁最上方有紅框橫幅「主金鑰是範本值」或「資料庫密碼是範本值」 | `.env` 的 `LITELLM_MASTER_KEY` 或 `DB_PASSWORD` 還是 `.env.example` 的公開預設值 | 見第 13 節的「把範本值換掉」 |
 | 登入頁顯示「輸錯次數太多，請等 N 分鐘後再試」 | 連續輸錯 5 次，鎖 15 分鐘（本機模式全站共用） | 等它到期，或 `docker compose up -d --force-recreate dashboard` |
 | 上手清單第 4 步一直沒打勾 | `scheduler` 容器沒在跑，或抓匯率失敗（網路不通） | `docker compose ps` 看 `scheduler` 是否在執行；`docker compose logs scheduler` 看失敗原因。排程失敗會每 5 分鐘重試 |
 | 「新增上游金鑰」顯示本機安裝模式的說明 | 本機模式不提供這個功能 | 照該畫面與上方「加 AI 金鑰」的做法 |
@@ -924,10 +985,22 @@ chmod +x /opt/costscale/scripts/*.sh /opt/costscale/deploy/*.sh
 
 1. 儀表板 →「應用程式」→「新增軟體」，取個名字（例如 `test-app`），模型限制先不選。
 2. 畫面會顯示一次金鑰（`sk-` 開頭），**只顯示這一次**，先複製起來。
-3. 在任何一台電腦執行（金鑰與網域換成你的，模型換成你有填金鑰的那個）：
+3. 在任何一台電腦執行（金鑰與網域換成你的，模型換成你有填金鑰的那個）。儀表板總覽的上手清單第 3 步也有同樣兩段，網址與模型會自動帶好。
+
+   macOS、Linux（Windows 的 Git Bash 也可以）。內容刻意用英文：Git Bash 轉送含中文的指令列時編碼會壞掉，閘道會回 `400`：
 
    ```bash
-   curl -s https://llm.example.com/v1/chat/completions -H "Authorization: Bearer sk-你的虛擬金鑰" -H "Content-Type: application/json" -d '{"model":"gemini-flash-free","messages":[{"role":"user","content":"用一句話自我介紹"}]}'
+   curl -s https://llm.example.com/v1/chat/completions -H "Authorization: Bearer sk-你的虛擬金鑰" -H "Content-Type: application/json" -d '{"model":"gemini-flash-free","messages":[{"role":"user","content":"Introduce yourself in one sentence, in Traditional Chinese."}]}'
+   ```
+
+   Windows PowerShell（整段貼上，會直接印出回答文字；PowerShell 裡的 `curl` 是另一個指令，不能用上面那行）：
+
+   ```powershell
+   $body = '{"model":"gemini-flash-free","messages":[{"role":"user","content":"用一句話自我介紹"}]}'
+   $f = New-TemporaryFile
+   Invoke-RestMethod -Uri "https://llm.example.com/v1/chat/completions" -Method Post -Headers @{ Authorization = "Bearer sk-你的虛擬金鑰" } -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -OutFile $f
+   (Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json).choices[0].message.content
+   Remove-Item $f
    ```
 
 4. 有回答就成功了。回到儀表板「總覽」，幾秒內會看到這一筆呼叫與花費。
@@ -1125,6 +1198,12 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db psql -
   不是幣別**——以台幣計價的海外服務（例如 OpenAI 的台灣訂價）帳單上照樣有那一行。
   非台幣計價的會自動填好；台幣計價的預設是「還沒確認」，等你對一次帳單再填。
 
+#### 2026-11-24 之後的版本：閘道只載入有真金鑰的部署、安全警告橫幅
+
+- **閘道的進入點換成 `scripts/litellm-entry.py`**：閘道啟動時，把「金鑰還是佔位字、而且同一個模型名底下還有真金鑰」的部署從暫存設定檔拿掉（`litellm-config.yaml` 本身不動）。只填一把 Gemini 或 Groq 金鑰時，不會再因為隨機輪到佔位字而回 `401`，或連續失敗後整組冷卻回 `429`（`No deployments available`）。每個多把金鑰的欄位都填滿時，沒有任何部署被拿掉，行為與以前相同。更新後第一次 `up -d --build` 會把閘道重建一次（約 30 秒不通）。這個進入點在雲端主機與本機模式都生效；補上第 2 把金鑰的做法不變（`apply-upstream-key.py` 與設定工具都會重建閘道）。
+- **儀表板每一頁最上方多了安全警告橫幅**：`AUTH_DISABLED=1`、`LITELLM_MASTER_KEY` 或資料庫密碼還是範本值時顯示，並在啟動紀錄留 `[security] 警告`。不阻擋啟動。處理方式見第 13 節的「把範本值換掉」。
+- **本機模式的排程容器固定安裝 `psycopg` 3.3.9**，不再跟著 PyPI 最新版走。
+
 #### 2026-11-23 之後的版本：帳號密碼登入
 
 儀表板多了管理員帳號密碼登入，Google 登入改為選用。**原本用 Google 登入的人不用做任何事**，更新後照常能登入，有兩點行為改變：
@@ -1253,6 +1332,16 @@ cd /opt/costscale && bash scripts/run-fx-fetch.sh
 | 「新增上游金鑰」一直停在排隊中 | 第 7 節的 `apply-upstream-key.py` 排程沒裝，或 spool 目錄權限不對（本機安裝模式沒有這支排程，儀表板會直接說明本機做法，不會排隊） | 補排程；重做第 5 節的 `chown` |
 | `docker compose up` 報 `Pool overlaps` | 主機本身的網路也用 10.87.213.0/24 | 見第 9.1 節 |
 | 儀表板金額全是 0 | 還沒有任何呼叫經過閘道 | 先做第 8 節 |
+
+### 把範本值換掉
+
+儀表板每一頁最上方出現紅框橫幅時（以及啟動紀錄裡有 `[security] 警告`），表示下面三項有一項需要處理。三項都不會阻擋啟動，只是提醒。
+
+| 橫幅 | 意思 | 怎麼辦 |
+|---|---|---|
+| 登入檢查已關閉 | `AUTH_DISABLED=1` | 把 `.env` 的 `AUTH_DISABLED` 改成 `0`，重建儀表板（見下一節）。這個開關只該用在測試 |
+| 主金鑰是範本值 | `LITELLM_MASTER_KEY` 還是 `sk-change-me` 這類公開預設值：知道預設值的人連得到閘道，就能用管理介面發金鑰、查看全部紀錄 | 雲端主機：執行 `bash /opt/costscale/scripts/install.sh`，它發現範本值會換成新的亂數並重建服務。本機：執行設定工具選 `1`，再 `docker compose up -d`。閘道會重建，約 30 秒內打不通 |
+| 資料庫密碼是範本值 | `DB_PASSWORD` 還是公開預設值（資料庫只綁在 `127.0.0.1`，外部連不到，但這台主機上的任何程式都能用預設密碼登入） | 資料庫建好之後，只改 `.env` 會讓閘道與儀表板連不上資料庫，要先在資料庫內改密碼：先產生新密碼（例如 `openssl rand -hex 24`），執行 `docker compose exec db psql -U costscale -d costscale -c "ALTER USER costscale PASSWORD '新密碼'"`，再把 `.env` 的 `DB_PASSWORD` 換成同一個新密碼，最後重建全部服務（雲端主機疊上 `-f docker-compose.vps.yml --profile full`）。新密碼只用英數，不要含 `'` 與 `$` |
 
 ### 改完 `.env` 怎麼生效
 
