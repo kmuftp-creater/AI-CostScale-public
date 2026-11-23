@@ -369,7 +369,7 @@ function KeyTable({ rows, upstream }: { rows: UpstreamKeyRow[]; upstream: Upstre
                   {k.slot ? ` · 第 ${k.slot}／${k.poolSize} 把` : ""} · {shown}
                   {more}
                   {k.tail === PLACEHOLDER_KEY_TAIL
-                    ? " · 這一格還沒填金鑰，閘道不會用到它；填了才會加入輪替"
+                    ? " · 這一格還沒填金鑰，填了才能用"
                     : missing > 0
                       ? ` · ${missing} 個部署閘道未載入`
                       : ""}
@@ -438,7 +438,7 @@ export default async function KeysPage() {
 
   const providerKeys = inv.keys.filter((k) => k.kind === "provider");
   const otherCreds = inv.keys.filter((k) => k.kind !== "provider");
-  const providers = [...new Set(providerKeys.map((k) => k.provider))];
+  const providers = [...new Set(providerKeys.filter((k) => k.tail !== PLACEHOLDER_KEY_TAIL).map((k) => k.provider))];
   // 還沒填的欄位（範本佔位值）不算一把金鑰：剛裝好只填 1 把時，不該顯示 10 把。
   const filledKeys = providerKeys.filter((k) => k.tail !== PLACEHOLDER_KEY_TAIL);
   const emptySlots = providerKeys.length - filledKeys.length;
