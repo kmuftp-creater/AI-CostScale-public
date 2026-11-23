@@ -1833,6 +1833,79 @@ footer .sep {
   font-size: 0.72rem;
   color: var(--neg);
 }
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  text-align: left;
+}
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+.login-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-btn);
+  font-size: var(--text-base);
+}
+.btn-login {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.65rem 1rem;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-btn);
+  font-weight: 600;
+  font-size: var(--text-base);
+  transition: filter var(--dur) var(--ease-out);
+}
+.btn-login:hover {
+  filter: brightness(1.06);
+}
+:root[data-theme="light"] .btn-login {
+  background: oklch(55% 0.13 252);
+  border-color: oklch(55% 0.13 252);
+}
+.login-or {
+  margin: var(--space-sm) 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.login-empty {
+  text-align: left;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+.login-empty strong {
+  display: block;
+  color: var(--ink);
+  font-size: var(--text-base);
+  margin-bottom: 0.3rem;
+}
+.login-empty p {
+  margin: 0.4rem 0;
+}
+.login-empty code {
+  display: block;
+  padding: 0.5rem 0.65rem;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-btn);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
 
 /* ── 響應式 ───────────────────────── */
 @media (max-width: 900px) {

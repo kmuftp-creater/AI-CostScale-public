@@ -43,12 +43,20 @@ GW_DOMAIN=""
 ALLOWED_EMAILS=""
 GOOGLE_ID=""
 GOOGLE_SECRET=""
+ADMIN_USER=""
+ADMIN_PASSWORD=""
+WANT_PASSWORD=0
+WANT_GOOGLE=0
 GEMINI_KEY=""
 LE_EMAIL=""
 NEW_ENV=0
 
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full)
 COMPOSE_STR="docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full"
+
+# 管理員密碼的雜湊與 .env 寫入函式，與 scripts/set-admin-password.sh 共用同一份，兩邊產生的格式才會一致
+# shellcheck source=set-admin-password.sh
+. "$(dirname "${BASH_SOURCE[0]}")/set-admin-password.sh"
 
 # ────────────────────────────── 輸出與錯誤處理 ──────────────────────────────
 
@@ -197,12 +205,17 @@ AI CostScale 互動式安裝腳本
         不問問題，全部答案改由環境變數提供：
           CS_DASH_DOMAIN       儀表板網域，例如 cost.example.com
           CS_GW_DOMAIN         閘道網域，例如 llm.example.com
-          CS_ALLOWED_EMAILS    可登入的 Google 帳號，逗號分隔
-          CS_GOOGLE_ID         Google OAuth 用戶端 ID（可省略，之後再補）
-          CS_GOOGLE_SECRET     Google OAuth 用戶端密鑰（有 ID 才會用到；可省略，之後再補）
+          CS_ADMIN_USER        管理員帳號（英數與 . _ -，3 到 32 字元；省略時用 admin）
+          CS_ADMIN_PASSWORD    管理員密碼（至少 10 個字元）。有給就設定帳號密碼登入
+          CS_ALLOWED_EMAILS    可登入的 Google 帳號，逗號分隔（有設 Google 登入才需要）
+          CS_GOOGLE_ID         Google OAuth 用戶端 ID（要用 Google 登入才給）
+          CS_GOOGLE_SECRET     Google OAuth 用戶端密鑰（有 ID 才會用到）
+        登入方式至少要設定一種：給 CS_ADMIN_PASSWORD，或給 CS_GOOGLE_ID 與 CS_GOOGLE_SECRET，
+        或 .env 裡已經有。兩種都沒有就報錯結束，不會裝出一個誰都登不進去的系統。
           CS_GEMINI_FREE_KEY   Gemini 免費金鑰（可省略）
           CS_LE_EMAIL          Let's Encrypt 通知信箱（letsencrypt 模式且尚未有憑證時必填）
-        信箱只收英數與 . _ % + -，白名單用逗號分隔；ID、密鑰、金鑰不能含空白、引號、$、反引號。
+        信箱只收英數與 . _ % + -，白名單用逗號分隔；Google ID、密鑰與 Gemini 金鑰不能含空白、引號、$、反引號；
+        密碼不能含換行與控制字元，最長 256 個字元。
         .env 已經有的欄位不需要再提供。
   -h, --help
         顯示這段說明。
@@ -419,6 +432,7 @@ label_of() {
   case "$1" in
     DASH_DOMAIN) echo "儀表板網域" ;;
     GW_DOMAIN) echo "閘道網域" ;;
+    ADMIN_USER) echo "管理員帳號" ;;
     ALLOWED_EMAILS) echo "可登入的 Google 帳號" ;;
     GOOGLE_ID) echo "Google 用戶端 ID" ;;
     GOOGLE_SECRET) echo "Google 用戶端密鑰" ;;
@@ -538,15 +552,105 @@ collect_answers() {
   valid_domain "$GW_DOMAIN" || die "閘道網域格式不對：$GW_DOMAIN（要像 llm.example.com；前面的 https:// 與後面的斜線會自動去掉）" "不需要看紀錄"
   [ "$DASH_DOMAIN" != "$GW_DOMAIN" ] || die "儀表板與閘道要用兩個不同的網域，現在兩個都是 $DASH_DOMAIN" "不需要看紀錄"
 
+  # 登入方式：帳號密碼與 Google 至少要有一種。已經設好的不動；兩種都沒有才問（非互動模式看 CS_ 環境變數）。
+  local cur_admin_user cur_admin_hash admin_ready=0 google_ready=0
+  cur_admin_user=$(env_get AUTH_ADMIN_USER); cur_admin_hash=$(env_get AUTH_ADMIN_PASSWORD_HASH)
+  if admin_valid_user "$cur_admin_user" && admin_hash_format_ok "$cur_admin_hash"; then admin_ready=1; fi
+  if ! is_unset "$cur_gid" && ! is_unset "$cur_gsec"; then google_ready=1; fi
+  WANT_PASSWORD=0; WANT_GOOGLE=0
+
+  if [ "$admin_ready" -eq 1 ]; then
+    say "  沿用 .env 的管理員帳號密碼登入設定（帳號：${cur_admin_user}），不會更動"
+  fi
+  if [ "$google_ready" -eq 1 ]; then
+    say "  沿用 .env 的 Google OAuth 設定"
+  fi
+
+  if [ "$NON_INTERACTIVE" -eq 1 ]; then
+    if [ "$admin_ready" -eq 0 ]; then
+      if [ -n "${CS_ADMIN_PASSWORD:-}" ]; then
+        WANT_PASSWORD=1
+      elif [ -n "${CS_ADMIN_USER:-}" ]; then
+        die "非互動模式有 CS_ADMIN_USER 但缺少 CS_ADMIN_PASSWORD（管理員密碼，至少 ${ADMIN_MIN_PASSWORD} 個字元）" "不需要看紀錄；用 --help 看全部環境變數"
+      fi
+    fi
+    if [ "$google_ready" -eq 0 ] && [ -n "${CS_GOOGLE_ID:-}" ]; then
+      WANT_GOOGLE=1
+    fi
+    if [ "$admin_ready" -eq 0 ] && [ "$google_ready" -eq 0 ] && [ "$WANT_PASSWORD" -eq 0 ] && [ "$WANT_GOOGLE" -eq 0 ]; then
+      die "沒有設定任何登入方式，裝完會是一個誰都登不進去的儀表板。請提供 CS_ADMIN_PASSWORD（帳號密碼登入，帳號用 CS_ADMIN_USER，省略時是 admin），或提供 CS_GOOGLE_ID、CS_GOOGLE_SECRET 與 CS_ALLOWED_EMAILS（Google 登入）。" "不需要看紀錄；用 --help 看全部環境變數"
+    fi
+  elif [ "$admin_ready" -eq 0 ] && [ "$google_ready" -eq 0 ]; then
+    local mode=""
+    say ""
+    say "  儀表板要用什麼方式登入？"
+    say "    1. 帳號密碼（預設、建議）：自己設一組管理員帳號與密碼，不用到 Google 設定任何東西"
+    say "    2. Google 帳號：要先到 Google Cloud Console 建立「OAuth 用戶端」（INSTALL.md 第 4 節）"
+    say "    3. 兩種都要"
+    while :; do
+      read -r -p "  請輸入 1、2 或 3（直接按 Enter 選 1）：" mode || die "讀不到輸入。要在沒有終端機的環境執行，請改用 --non-interactive" "不需要看紀錄"
+      [ -n "$mode" ] || mode=1
+      case "$mode" in 1|2|3) break ;; esac
+      echo "  只能輸入 1、2 或 3。"
+    done
+    case "$mode" in
+      1) WANT_PASSWORD=1 ;;
+      2) WANT_GOOGLE=1 ;;
+      3) WANT_PASSWORD=1; WANT_GOOGLE=1 ;;
+    esac
+  fi
+
+  if [ "$WANT_PASSWORD" -eq 1 ]; then
+    local pw1 pw2
+    if [ "$NON_INTERACTIVE" -eq 1 ]; then
+      ADMIN_USER="${CS_ADMIN_USER:-admin}"
+      ADMIN_PASSWORD="${CS_ADMIN_PASSWORD}"
+      admin_valid_user "$ADMIN_USER" || die "環境變數 CS_ADMIN_USER 的格式不對：只收英數與 . _ -，3 到 32 個字元" "不需要看紀錄"
+      admin_valid_password "$ADMIN_PASSWORD" || die "環境變數 CS_ADMIN_PASSWORD 不合格：${ADMIN_PW_REASON}" "不需要看紀錄"
+    else
+      say ""
+      say "  設定管理員帳號與密碼。密碼只會以雜湊的形式存進 .env，不會留下明碼，也不會出現在畫面與紀錄檔。"
+      while :; do
+        read -r -p "  管理員帳號（直接按 Enter 用 admin）：" ADMIN_USER || die "讀不到輸入。要在沒有終端機的環境執行，請改用 --non-interactive" "不需要看紀錄"
+        [ -n "$ADMIN_USER" ] || ADMIN_USER="admin"
+        admin_valid_user "$ADMIN_USER" && break
+        echo "  格式不對：只收英數與 . _ -，3 到 32 個字元。請再輸入一次。"
+      done
+      while :; do
+        read -rs -p "  管理員密碼（至少 ${ADMIN_MIN_PASSWORD} 個字元，輸入時畫面不會顯示）：" pw1 || die "讀不到輸入。要在沒有終端機的環境執行，請改用 --non-interactive" "不需要看紀錄"
+        echo
+        if ! admin_valid_password "$pw1"; then
+          echo "  ${ADMIN_PW_REASON}。請再輸入一次。"
+          continue
+        fi
+        read -rs -p "  再輸入一次密碼：" pw2 || die "讀不到輸入。要在沒有終端機的環境執行，請改用 --non-interactive" "不需要看紀錄"
+        echo
+        if [ "$pw1" != "$pw2" ]; then
+          echo "  兩次輸入不一樣。請重新輸入。"
+          continue
+        fi
+        break
+      done
+      ADMIN_PASSWORD="$pw1"
+      say "  已收到密碼（共 ${#ADMIN_PASSWORD} 個字元，畫面不顯示內容）。"
+    fi
+  fi
+
+  # 可登入的 Google 帳號：只有要用 Google 登入才必填。只用帳號密碼時不問（非互動模式有給就收）。
   if mail_unset "$cur_mail"; then
-    ask ALLOWED_EMAILS CS_ALLOWED_EMAILS "可以登入儀表板的 Google 帳號，多個用逗號分隔（例如 you@example.com,boss@example.com）。只有這些帳號登得進去。" 1 0 chk_emails "只收英數與 . _ % + - 加上 @ 與網域，要像 you@example.com，多個用逗號分隔"
-    ALLOWED_EMAILS=$(norm_emails "$ALLOWED_EMAILS")
+    if [ "$WANT_GOOGLE" -eq 1 ] || [ "$google_ready" -eq 1 ]; then
+      ask ALLOWED_EMAILS CS_ALLOWED_EMAILS "可以登入儀表板的 Google 帳號，多個用逗號分隔（例如 you@example.com,boss@example.com）。只有這些帳號登得進去。" 1 0 chk_emails "只收英數與 . _ % + - 加上 @ 與網域，要像 you@example.com，多個用逗號分隔"
+      ALLOWED_EMAILS=$(norm_emails "$ALLOWED_EMAILS")
+    elif [ "$NON_INTERACTIVE" -eq 1 ] && [ -n "${CS_ALLOWED_EMAILS:-}" ]; then
+      ask ALLOWED_EMAILS CS_ALLOWED_EMAILS "可登入的 Google 帳號" 0 0 chk_emails "只收英數與 . _ % + - 加上 @ 與網域，要像 you@example.com，多個用逗號分隔"
+      ALLOWED_EMAILS=$(norm_emails "$ALLOWED_EMAILS")
+    fi
   else
     ALLOWED_EMAILS="$cur_mail"
     say "  沿用 .env 的登入白名單"
   fi
 
-  if is_unset "$cur_gid" || is_unset "$cur_gsec"; then
+  if [ "$WANT_GOOGLE" -eq 1 ]; then
     if [ "$NON_INTERACTIVE" -eq 0 ]; then
       say ""
       say "  Google 登入要先在 Google 建立一組「OAuth 用戶端」：白話說，就是讓 Google 認得你這個儀表板、"
@@ -562,10 +666,11 @@ collect_answers() {
     fi
     if [ -z "$GOOGLE_ID" ] || [ -z "$GOOGLE_SECRET" ]; then
       GOOGLE_ID=""; GOOGLE_SECRET=""
+      if [ "$NON_INTERACTIVE" -eq 1 ]; then
+        die "非互動模式有 CS_GOOGLE_ID 但缺少 CS_GOOGLE_SECRET" "不需要看紀錄；用 --help 看全部環境變數"
+      fi
       say "  已跳過 Google 登入設定，結尾會提醒你怎麼補。"
     fi
-  else
-    say "  沿用 .env 的 Google OAuth 設定"
   fi
 
   if is_unset "$cur_gem"; then
@@ -726,10 +831,19 @@ build_env() {
   if [ -n "$GOOGLE_ID" ] && [ -n "$GOOGLE_SECRET" ]; then
     env_fill AUTH_GOOGLE_ID "$GOOGLE_ID"
     env_fill AUTH_GOOGLE_SECRET "$GOOGLE_SECRET"
-  else
-    # 還沒有真值就寫 placeholder，結尾會提醒要補
-    is_unset "$(env_get AUTH_GOOGLE_ID)" && env_set AUTH_GOOGLE_ID placeholder
-    is_unset "$(env_get AUTH_GOOGLE_SECRET)" && env_set AUTH_GOOGLE_SECRET placeholder
+  fi
+  # 全新的 .env 沒有設 Google 白名單：範本裡的預設值 you@example.com 不是你填的，清成空值
+  if [ "$NEW_ENV" -eq 1 ] && [ -z "$ALLOWED_EMAILS" ]; then
+    env_set AUTH_ALLOWED_EMAILS ""
+  fi
+  # 管理員帳號與密碼：只在 .env 還沒有可用設定時才寫（collect_answers 已判斷），只寫帳號與雜湊，不存明碼
+  if [ "$WANT_PASSWORD" -eq 1 ]; then
+    local admin_hash
+    admin_hash=$(admin_make_hash "$ADMIN_PASSWORD") || die "產生管理員密碼雜湊失敗（python3 的 hashlib.scrypt）。" "python3 --version"
+    admin_hash_format_ok "$admin_hash" || die "產生管理員密碼雜湊失敗：輸出格式不對。" "python3 --version"
+    admin_env_write "$APP_DIR/.env" "$ADMIN_USER" "$admin_hash"
+    ADMIN_PASSWORD=""
+    say "  已設定管理員帳號：${ADMIN_USER}（密碼只以雜湊存放，不會顯示在畫面上，也不會寫進紀錄檔）"
   fi
   if [ -n "$GEMINI_KEY" ]; then
     env_fill GEMINI_FREE_KEY_1 "$GEMINI_KEY"
@@ -833,7 +947,9 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # 覆寫（不是附加）：登入的輸錯鎖定以這個標頭最左邊的 IP 為單位，
+        # 用戶端自己帶的 X-Forwarded-For 必須丟掉，否則可以偽造 IP 繞過鎖定。
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         client_max_body_size 20m;
     }
@@ -1165,14 +1281,29 @@ check() { # check <說明> <指令...>
 
 env_required_ok() {
   local k bad=""
-  for k in DB_PASSWORD LITELLM_MASTER_KEY AUTH_SECRET AUTH_URL GATEWAY_PUBLIC_URL AUTH_ALLOWED_EMAILS ALERT_CRON_TOKEN OTEL_INGEST_TOKEN BRIDGE_TOKEN; do
-    if [ "$k" = "AUTH_ALLOWED_EMAILS" ]; then
-      mail_unset "$(env_get "$k")" && bad="$bad $k"
-    elif is_unset "$(env_get "$k")"; then
+  for k in DB_PASSWORD LITELLM_MASTER_KEY AUTH_SECRET AUTH_URL GATEWAY_PUBLIC_URL ALERT_CRON_TOKEN OTEL_INGEST_TOKEN BRIDGE_TOKEN; do
+    if is_unset "$(env_get "$k")"; then
       bad="$bad $k"
     fi
   done
+  # Google 白名單：只有設了 Google 登入才必填（帳號密碼登入不看信箱）
+  if google_configured && mail_unset "$(env_get AUTH_ALLOWED_EMAILS)"; then bad="$bad AUTH_ALLOWED_EMAILS"; fi
   [ -z "$bad" ] || { say "    還沒填好的欄位：$bad"; return 1; }
+}
+
+# 登入方式是否已設定（看 .env）
+password_configured() {
+  admin_valid_user "$(env_get AUTH_ADMIN_USER)" && admin_hash_format_ok "$(env_get AUTH_ADMIN_PASSWORD_HASH)"
+}
+google_configured() {
+  ! is_unset "$(env_get AUTH_GOOGLE_ID)" && ! is_unset "$(env_get AUTH_GOOGLE_SECRET)"
+}
+login_configured() { password_configured || google_configured; }
+# 儀表板自己看到的登入頁：不是「還沒有設定任何登入方式」，代表 .env 的設定真的傳進了容器
+login_page_enabled() {
+  local body
+  body=$(curl -s --max-time 10 http://127.0.0.1:3300/login) || return 1
+  [ -n "$body" ] && ! printf '%s' "$body" | grep -q '還沒有設定任何登入方式'
 }
 
 final_summary() {
@@ -1199,14 +1330,20 @@ final_summary() {
 
   check ".env 權限為 600" bash -c "[ \"\$(stat -c '%a' $APP_DIR/.env)\" = 600 ]"
   check "AUTH_DISABLED=0" bash -c "grep -qx 'AUTH_DISABLED=0' $APP_DIR/.env"
-  if env_required_ok; then check_ok ".env 必要欄位都已填好（供應商金鑰與 Google 登入除外）"; else check_fail ".env 必要欄位都已填好"; fi
+  check "至少設定了一種登入方式（帳號密碼或 Google）" login_configured
+  if login_configured; then
+    check "儀表板登入頁已啟用登入方式（不是「還沒有設定任何登入方式」）" login_page_enabled
+  fi
+  if env_required_ok; then check_ok ".env 必要欄位都已填好（供應商金鑰除外）"; else check_fail ".env 必要欄位都已填好"; fi
   check "排程區塊恰好一份" bash -c "[ \"\$(crontab -l 2>/dev/null | grep -cF '$CRON_BEGIN')\" = 1 ]"
   check "/root/vertex-sa.json 是檔案" test -f /root/vertex-sa.json
   check "spool/upstream-keys 存在且權限 700" bash -c "[ \"\$(stat -c '%a' $APP_DIR/spool/upstream-keys)\" = 700 ]"
 
   say ""
-  local google_pending=0
-  if is_unset "$(env_get AUTH_GOOGLE_ID)" || is_unset "$(env_get AUTH_GOOGLE_SECRET)"; then google_pending=1; fi
+  local has_pw=0 has_google=0 no_login=0
+  password_configured && has_pw=1
+  google_configured && has_google=1
+  [ "$has_pw" -eq 1 ] || [ "$has_google" -eq 1 ] || no_login=1
   local gem_pending=0
   is_unset "$(env_get GEMINI_FREE_KEY_1)" && gem_pending=1
 
@@ -1223,9 +1360,13 @@ final_summary() {
   [ "$TLS_MODE" != "selfsigned" ] || say "（自簽憑證只供內網或測試，瀏覽器會提示不安全；要給正式使用，請改用 --tls letsencrypt。）"
   [ "$TLS_MODE" != "skip" ] || say "（--tls skip：尚未設定 HTTPS，網址要等你設好 nginx 才連得到。）"
 
-  if [ "$google_pending" -eq 1 ]; then
+  if [ "$no_login" -eq 1 ]; then
     say ""
-    say "還不能登入儀表板：Google 登入設定還沒補。請先做下面「下一步」的第 1 步，再做後面的步驟。"
+    say "還不能登入儀表板：還沒有設定任何登入方式。請先做下面「下一步」的第 1 步，再做後面的步驟。"
+  else
+    say ""
+    if [ "$has_pw" -eq 1 ]; then say "登入方式：帳號密碼（帳號：$(env_get AUTH_ADMIN_USER)）"; fi
+    if [ "$has_google" -eq 1 ]; then say "登入方式：Google 帳號（只有 AUTH_ALLOWED_EMAILS 裡的帳號能登入）"; fi
   fi
   if [ "$gem_pending" -eq 1 ]; then
     say ""
@@ -1241,14 +1382,22 @@ final_summary() {
   say ""
   say "下一步（INSTALL.md 第 8 節）："
   local n=1
-  if [ "$google_pending" -eq 1 ]; then
-    say "  ${n}. 補上 Google 登入設定（只要做一次）："
-    say "     a. 到 https://console.cloud.google.com/apis/credentials 建立「OAuth 用戶端 ID」（類型選「網頁應用程式」，做法見 INSTALL.md 第 4 節），"
-    say "        「已授權的重新導向 URI」填 https://${DASH_DOMAIN}/api/auth/callback/google ，一個字都不要多。"
-    say "     b. 用 nano ${APP_DIR}/.env 填兩個欄位：AUTH_GOOGLE_ID（用戶端 ID）與 AUTH_GOOGLE_SECRET（用戶端密鑰），把原本的 placeholder 換掉並存檔。"
-    say "     c. 在 ${APP_DIR} 執行下面這一行讓新設定生效（改完 .env 一定要用 up -d；restart 不會讀到新值）："
+  if [ "$no_login" -eq 1 ]; then
+    say "  ${n}. 設定登入方式（只要做一次），兩種擇一："
+    say "     甲、帳號密碼（建議，不用 Google）：在主機上執行下面這一行，依提示設定管理員帳號與密碼："
+    say "        bash ${APP_DIR}/scripts/set-admin-password.sh"
+    say "        腳本最後會印出一行 docker compose 指令，照著執行讓設定生效（改完 .env 一定要用 up -d；restart 不會讀到新值）："
     say "        ${COMPOSE_STR} up -d"
-    say "     （不想等 Google 設定，可以先在主機上用 ${APP_DIR}/scripts/issue-key.sh test-app \"說明文字\" 發金鑰，照第 $((n + 2)) 步測試。）"
+    say "     乙、Google 登入："
+    say "        a. 到 https://console.cloud.google.com/apis/credentials 建立「OAuth 用戶端 ID」（類型選「網頁應用程式」，做法見 INSTALL.md 第 4 節），"
+    say "           「已授權的重新導向 URI」填 https://${DASH_DOMAIN}/api/auth/callback/google ，一個字都不要多。"
+    say "        b. 用 nano ${APP_DIR}/.env 填 AUTH_GOOGLE_ID（用戶端 ID）、AUTH_GOOGLE_SECRET（用戶端密鑰），並把 AUTH_ALLOWED_EMAILS 改成你的 Google 信箱，存檔。"
+    say "        c. 在 ${APP_DIR} 執行上面那一行 ${COMPOSE_STR} up -d。"
+    say "     （不想等，可以先在主機上用 ${APP_DIR}/scripts/issue-key.sh test-app \"說明文字\" 發金鑰，照第 $((n + 2)) 步測試。）"
+    n=$((n + 1))
+  elif [ "$has_pw" -eq 1 ]; then
+    say "  ${n}. 用瀏覽器開 https://${DASH_DOMAIN} ，帳號 $(env_get AUTH_ADMIN_USER)，密碼是你剛才設定的那一組。連續輸錯 5 次會鎖 15 分鐘。"
+    say "     忘記密碼或想換密碼：在主機上重跑 bash ${APP_DIR}/scripts/set-admin-password.sh，再執行 ${COMPOSE_STR} up -d。"
     n=$((n + 1))
   fi
   say "  ${n}. 儀表板 →「應用程式」→「新增軟體」，取個名字，複製只顯示一次的虛擬金鑰（sk- 開頭）。"
@@ -1257,7 +1406,7 @@ final_summary() {
   say "     curl -s https://${GW_DOMAIN}/v1/chat/completions -H \"Authorization: Bearer sk-你的虛擬金鑰\" -H \"Content-Type: application/json\" -d '{\"model\":\"gemini-flash-free\",\"messages\":[{\"role\":\"user\",\"content\":\"用一句話自我介紹\"}]}'"
   n=$((n + 1))
   say "  ${n}. 回儀表板「總覽」，幾秒內會看到這一筆呼叫與花費。"
-  [ "$google_pending" -eq 1 ] || say "  沒有瀏覽器時，也可以在主機上用 ${APP_DIR}/scripts/issue-key.sh test-app \"說明文字\" 發金鑰。"
+  [ "$no_login" -eq 1 ] || say "  沒有瀏覽器時，也可以在主機上用 ${APP_DIR}/scripts/issue-key.sh test-app \"說明文字\" 發金鑰。"
   say ""
   say "安裝紀錄：${LOG_FILE}（不含金鑰）"
 

@@ -1,0 +1,157 @@
+// 跨語言測試：scripts/set-admin-password.sh（python3 hashlib.scrypt）產生的雜湊，
+// 要能被 dashboard/lib/admin-password.ts（node:crypto scrypt）驗證通過。
+// 另外測雜湊格式防呆與 lib/login-throttle.ts 的鎖定規則。
+//
+// 執行（要有 Node 22.18 以上、bash、python3；在專案的 dashboard 資料夾裡）：
+//   node scripts/test-admin-password.mjs
+import { execFileSync } from "node:child_process";
+import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const script = path.resolve(here, "../../scripts/set-admin-password.sh");
+
+const { getAdminConfig, parseHash, verifyAdminLogin } = await import("../lib/admin-password.ts");
+const throttle = await import("../lib/login-throttle.ts");
+
+let pass = 0;
+function ok(name) {
+  pass += 1;
+  console.log(`  通過  ${name}`);
+}
+
+function pyHash(password) {
+  // 密碼走環境變數傳進 bash，再由函式經 stdin 交給 python；不經過命令列參數
+  return execFileSync(
+    "bash",
+    ["-c", `source "${script}"; admin_make_hash "$CS_TEST_PW"`],
+    { env: { ...process.env, CS_TEST_PW: password }, encoding: "utf8", windowsHide: true },
+  ).trim();
+}
+
+// 1. python 產生、node 驗證
+const passwords = ["Correct-Horse-9", "密碼Pass123!測試", "a$b\"c'd\\e f`g", "x".repeat(256)];
+for (const pw of passwords) {
+  const h = pyHash(pw);
+  assert.match(h, /^scrypt:16384:8:1:[0-9a-f]{32}:[0-9a-f]{64}$/);
+  assert.ok(!h.includes("$"), "雜湊不得含 $");
+  const cfg = getAdminConfig({ AUTH_ADMIN_USER: "admin", AUTH_ADMIN_PASSWORD_HASH: h });
+  assert.ok(cfg, "python 產生的雜湊要被接受");
+  assert.equal(await verifyAdminLogin(cfg, "admin", pw), true, "正確密碼要通過");
+  assert.equal(await verifyAdminLogin(cfg, "admin", pw + "x"), false, "錯誤密碼不得通過");
+  assert.equal(await verifyAdminLogin(cfg, "Admin", pw), false, "帳號大小寫不同不得通過");
+  assert.equal(await verifyAdminLogin(cfg, "other", pw), false, "帳號錯不得通過");
+}
+ok("python 產生的雜湊 node 驗證通過（4 組密碼，含中文、特殊字元、256 字元）；錯誤密碼與錯誤帳號不通過");
+
+const h1 = pyHash("Correct-Horse-9");
+const h2 = pyHash("Correct-Horse-9");
+assert.notEqual(h1, h2, "同一個密碼每次的 salt 要不同");
+ok("同一個密碼兩次產生的雜湊不同（salt 亂數）");
+
+const cfg = getAdminConfig({ AUTH_ADMIN_USER: "admin", AUTH_ADMIN_PASSWORD_HASH: h1 });
+for (const bad of [undefined, null, 123, {}, [], ""]) {
+  assert.equal(await verifyAdminLogin(cfg, "admin", bad), false);
+  assert.equal(await verifyAdminLogin(cfg, bad, "Correct-Horse-9"), false);
+}
+assert.equal(await verifyAdminLogin(cfg, "admin", "p".repeat(1025)), false);
+assert.equal(await verifyAdminLogin(cfg, "a".repeat(65), "Correct-Horse-9"), false);
+ok("非字串、空字串、超長輸入一律不通過，不丟例外");
+
+// 2. 格式壞掉的雜湊視為未設定，不丟例外，警告不含雜湊內容
+const good = h1.split(":");
+const variants = {
+  空字串: "",
+  亂碼: "garbage",
+  欄位太少: "scrypt:16384:8:1:" + good[4],
+  欄位太多: h1 + ":extra",
+  前綴不對: "bcrypt" + h1.slice(6),
+  N不是2的次方: `scrypt:16385:8:1:${good[4]}:${good[5]}`,
+  N太小: `scrypt:1024:8:1:${good[4]}:${good[5]}`,
+  N太大: `scrypt:1048576:8:1:${good[4]}:${good[5]}`,
+  r是0: `scrypt:16384:0:1:${good[4]}:${good[5]}`,
+  r太大: `scrypt:16384:64:1:${good[4]}:${good[5]}`,
+  p太大: `scrypt:16384:8:99:${good[4]}:${good[5]}`,
+  salt太短: `scrypt:16384:8:1:abcd:${good[5]}`,
+  salt奇數長度: `scrypt:16384:8:1:${good[4]}0:${good[5]}`,
+  雜湊太短: `scrypt:16384:8:1:${good[4]}:${good[5].slice(2)}`,
+  雜湊含非十六進位: `scrypt:16384:8:1:${good[4]}:${"zz" + good[5].slice(2)}`,
+  含美元符號: `scrypt:16384:8:1:${good[4]}:$${good[5].slice(1)}`,
+  數字含負號: `scrypt:-16384:8:1:${good[4]}:${good[5]}`,
+};
+const warns = [];
+const origWarn = console.warn;
+console.warn = (...a) => warns.push(a.join(" "));
+try {
+  for (const [name, v] of Object.entries(variants)) {
+    assert.equal(parseHash(v), null, `parseHash 應拒絕：${name}`);
+    assert.equal(getAdminConfig({ AUTH_ADMIN_USER: "admin", AUTH_ADMIN_PASSWORD_HASH: v }), null, `應視為未設定：${name}`);
+  }
+  assert.equal(getAdminConfig({ AUTH_ADMIN_USER: "admin" }), null);
+  assert.equal(getAdminConfig({ AUTH_ADMIN_PASSWORD_HASH: h1 }), null);
+  assert.equal(getAdminConfig({ AUTH_ADMIN_USER: "ab", AUTH_ADMIN_PASSWORD_HASH: h1 }), null, "帳號太短");
+  assert.equal(getAdminConfig({ AUTH_ADMIN_USER: "a".repeat(33), AUTH_ADMIN_PASSWORD_HASH: h1 }), null, "帳號太長");
+  assert.equal(getAdminConfig({ AUTH_ADMIN_USER: "ad min", AUTH_ADMIN_PASSWORD_HASH: h1 }), null, "帳號含空白");
+  assert.equal(getAdminConfig({ AUTH_ADMIN_USER: "ad$min", AUTH_ADMIN_PASSWORD_HASH: h1 }), null, "帳號含特殊字元");
+  assert.equal(getAdminConfig({}), null);
+  assert.equal(getAdminConfig({ AUTH_ADMIN_USER: "", AUTH_ADMIN_PASSWORD_HASH: "" }), null);
+} finally {
+  console.warn = origWarn;
+}
+assert.ok(warns.length >= 1, "格式不對時要在 log 印警告");
+for (const w of warns) {
+  assert.ok(!w.includes(good[5]) && !w.includes(good[4]), "警告不得含雜湊或 salt");
+}
+ok(`格式壞掉的雜湊與帳號（${Object.keys(variants).length + 6} 種）都視為未設定、不丟例外，警告 ${warns.length} 則且不含雜湊內容`);
+
+// 3. 指紋：換密碼後指紋不同
+const cfgA = getAdminConfig({ AUTH_ADMIN_USER: "admin", AUTH_ADMIN_PASSWORD_HASH: h1 });
+const cfgB = getAdminConfig({ AUTH_ADMIN_USER: "admin", AUTH_ADMIN_PASSWORD_HASH: h2 });
+assert.notEqual(cfgA.fingerprint, cfgB.fingerprint);
+assert.ok(!h1.includes(cfgA.fingerprint));
+ok("換密碼後 session 指紋不同（舊登入會失效）");
+
+// 4. 鎖定規則
+const T = 1_000_000_000_000;
+throttle.resetThrottle();
+for (let i = 0; i < 4; i++) throttle.recordFailure("1.1.1.1", T + i * 1000);
+assert.equal(throttle.lockedMinutes("1.1.1.1", T + 5000), 0, "4 次失敗還沒鎖");
+throttle.recordFailure("1.1.1.1", T + 5000);
+assert.equal(throttle.lockedMinutes("1.1.1.1", T + 6000), 15, "第 5 次失敗後鎖 15 分鐘（取整到分鐘）");
+assert.equal(throttle.lockedMinutes("1.1.1.1", T + 5000 + 14 * 60000 + 30000), 1, "剩 30 秒顯示 1 分鐘");
+assert.equal(throttle.lockedMinutes("1.1.1.1", T + 5000 + 15 * 60000), 0, "15 分鐘後解鎖");
+assert.equal(throttle.lockedMinutes("2.2.2.2", T + 6000), 0, "另一個 IP 不受影響");
+ok("同一 IP 5 次失敗鎖 15 分鐘；另一個 IP 不受影響；時間到解鎖");
+
+throttle.resetThrottle();
+for (let i = 0; i < 4; i++) throttle.recordFailure("3.3.3.3", T + i * 1000);
+throttle.recordFailure("3.3.3.3", T + 16 * 60000); // 前 4 次已超過 15 分鐘視窗
+assert.equal(throttle.lockedMinutes("3.3.3.3", T + 16 * 60000 + 1000), 0, "舊的失敗滑出視窗後不累計");
+ok("超過 15 分鐘的舊失敗不累計");
+
+throttle.resetThrottle();
+for (let i = 0; i < 30; i++) throttle.recordFailure(`10.0.0.${i}`, T + i * 1000);
+assert.equal(throttle.globalDelayMs(T + 40000), 0, "全站 30 次還不延遲（要超過 30）");
+throttle.recordFailure("10.0.1.1", T + 41000);
+assert.equal(throttle.globalDelayMs(T + 42000), 2000, "全站超過 30 次後固定延遲 2 秒");
+assert.equal(throttle.lockedMinutes("10.0.5.5", T + 42000), 0, "延遲不會把其他 IP 鎖住");
+assert.equal(throttle.globalDelayMs(T + 16 * 60000 + 41000), 0, "視窗過後恢復");
+ok("全站超過 30 次失敗後每次延遲 2 秒；不鎖其他 IP；視窗過後恢復");
+
+throttle.resetThrottle();
+throttle.recordFailure("4.4.4.4", T);
+throttle.recordSuccess("4.4.4.4");
+for (let i = 0; i < 4; i++) throttle.recordFailure("4.4.4.4", T + 1000 + i);
+assert.equal(throttle.lockedMinutes("4.4.4.4", T + 2000), 0, "成功登入會清掉該 IP 的失敗計數");
+ok("成功登入清掉該 IP 的失敗計數");
+
+const H = (o) => new Headers(o);
+assert.equal(throttle.clientIp(H({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" })), "203.0.113.9");
+assert.equal(throttle.clientIp(H({ "x-forwarded-for": "2001:DB8::1" })), "2001:db8::1");
+assert.equal(throttle.clientIp(H({ "x-real-ip": "198.51.100.7" })), "198.51.100.7");
+assert.equal(throttle.clientIp(H({ "x-forwarded-for": "<script>" })), "unknown");
+assert.equal(throttle.clientIp(H({})), "unknown");
+ok("來源 IP 取 X-Forwarded-For 最左邊一個；不像 IP 的內容一律歸 unknown");
+
+console.log(`\n全部通過（${pass} 組）`);

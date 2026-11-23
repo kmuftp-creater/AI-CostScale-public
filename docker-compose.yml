@@ -86,9 +86,13 @@ services:
       GITHUB_TOKENS: ${GITHUB_TOKENS:-}
       # 看板推送通道（各電腦的 push-status.ps1 用）。未設定＝停用（503）。
       BOARD_PUSH_TOKEN: ${BOARD_PUSH_TOKEN:-}
-      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID}
-      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET}
-      AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS}
+      # 登入方式：帳號密碼與 Google 可以只設其中一種（沒設的留空）。兩種都沒設時沒有任何人登得進去。
+      # 雜湊格式不含 $（scrypt:N:r:p:salt:hash），docker compose 才不會把它當變數替換。
+      AUTH_ADMIN_USER: ${AUTH_ADMIN_USER:-}
+      AUTH_ADMIN_PASSWORD_HASH: ${AUTH_ADMIN_PASSWORD_HASH:-}
+      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID:-}
+      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET:-}
+      AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS:-}
       AUTH_DISABLED: ${AUTH_DISABLED:-0}
       AUTH_TRUST_HOST: "true"
       # 預算告警：cron 用 token 呼叫 /api/budgets/check，寄信走下面的 SMTP 設定
