@@ -11,5 +11,16 @@ if [ -z "$TOKEN" ]; then
   echo "錯誤：.env 缺 ALERT_CRON_TOKEN"
   exit 1
 fi
-curl -s -m 600 -X POST -H "Authorization: Bearer ${TOKEN}" http://127.0.0.1:3300/api/board/sync
-echo
+RESP=$(curl -s -m 600 -w '\n%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" http://127.0.0.1:3300/api/board/sync || true)
+CODE=$(printf '%s' "$RESP" | tail -1)
+BODY=$(printf '%s' "$RESP" | sed '$d')
+echo "$BODY"
+if [ "$CODE" = "200" ]; then
+  exit 0
+fi
+# 沒設定 GitHub 權杖代表沒在用看板，是正常狀態，不算失敗
+if printf '%s' "$BODY" | grep -q '未設定 GITHUB_TOKEN'; then
+  exit 0
+fi
+echo "錯誤：看板同步失敗（HTTP ${CODE:-無回應}）" >&2
+exit 1

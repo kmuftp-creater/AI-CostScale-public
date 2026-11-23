@@ -13,7 +13,8 @@ services:
     ports: !override
       - "127.0.0.1:4400:4000"
     environment:
-      # Vertex AI 服務帳戶金鑰。不用 Vertex 可以不放這個檔，閘道照樣啟動。
+      # Vertex AI 服務帳戶金鑰。不用 Vertex 也要先建一個空檔（touch /root/vertex-sa.json，見 INSTALL.md 第 5 節），
+      # 否則 Docker 會在主機上建出同名的「資料夾」，之後放不進真的金鑰檔。
       GOOGLE_APPLICATION_CREDENTIALS: /secrets/vertex-sa.json
     volumes:
       - ./litellm-config.yaml:/app/config.yaml:ro

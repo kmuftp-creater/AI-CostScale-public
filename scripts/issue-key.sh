@@ -38,6 +38,10 @@ cd /opt/costscale
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.vps.yml"
 MASTER_KEY=$(grep '^LITELLM_MASTER_KEY=' .env | cut -d= -f2-)
 GATEWAY="http://127.0.0.1:4400"
+# 對外網址只用在最後印出的範例。從 shell 直接執行時環境變數是空的，所以讀 .env，沒設定才退回範例網址
+GATEWAY_PUBLIC_URL=$(grep -m1 '^GATEWAY_PUBLIC_URL=' .env | cut -d= -f2- || true)
+GATEWAY_PUBLIC_URL=${GATEWAY_PUBLIC_URL%/}
+GATEWAY_PUBLIC_URL=${GATEWAY_PUBLIC_URL:-https://llm.example.com}
 
 psql_q() { $COMPOSE exec -T db psql -U costscale -d costscale -tAc "$1"; }
 
@@ -208,11 +212,11 @@ echo
 echo "   $NEW_KEY"
 echo
 echo " 用法："
-echo "   Gemini 原生：${GATEWAY_PUBLIC_URL:-https://llm.example.com}"
-echo "   OpenAI 相容：${GATEWAY_PUBLIC_URL:-https://llm.example.com}/v1"
+echo "   Gemini 原生：${GATEWAY_PUBLIC_URL}"
+echo "   OpenAI 相容：${GATEWAY_PUBLIC_URL}/v1"
 echo
 echo " 可用模型（即時查詢）："
-echo "   curl -s ${GATEWAY_PUBLIC_URL:-https://llm.example.com}/v1beta/models"
+echo "   curl -s ${GATEWAY_PUBLIC_URL}/v1beta/models"
 echo "════════════════════════════════════════════════════"
 echo
 echo "已登記進儀表板的應用程式清單，用量會歸戶到「$APP_NAME」名下。"

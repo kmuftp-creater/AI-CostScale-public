@@ -40,13 +40,95 @@
 | 一個 Google 帳號 | 建 OAuth 用戶端，讓儀表板用 Google 登入 |
 | 至少一把 AI 金鑰 | 例如 Google AI Studio 的免費金鑰，裝好之後測試用 |
 
+兩個網域都要在你的 DNS 服務商那邊各建一筆 A 紀錄，指向主機的 IP。紀錄生效前，第 6 節申請憑證會失敗；生效時間短則幾分鐘，長則幾小時，依服務商而定。
+
+### 1.1 安裝 Docker
+
+下面是 Ubuntu 22.04 與 24.04 照 Docker 官方 apt 套件庫的標準步驟。已經裝好 Docker 的主機，直接跳到本節最後的版本確認。**不要用 Ubuntu 預設倉庫的 `docker.io`**，它的 Compose 外掛是另一個套件，版本也跟官方不同。以下指令都用 root 帳號或在前面加 `sudo` 執行，一行一行貼。
+
+```bash
+sudo apt update
+```
+
+```bash
+sudo apt install -y ca-certificates curl
+```
+
+```bash
+sudo install -m 0755 -d /etc/apt/keyrings
+```
+
+```bash
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+```
+
+```bash
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+```
+
+```bash
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+```
+
+```bash
+sudo apt update
+```
+
+```bash
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
 確認 Docker 版本：
+
+```bash
+docker --version
+```
+
+要看到 `Docker version` 開頭的一行，後面接版本號，例如 `Docker version 28.0.1, build ...`。
 
 ```bash
 docker compose version
 ```
 
-輸出的版本號要在 `v2.24.4` 以上。
+要看到 `Docker Compose version` 開頭的一行。版本號要在 2.24.4 以上，有沒有 `v` 前綴都可以（例如 `v2.40.3` 或 `2.40.3`），後面帶的發行版後綴不用管。
+
+### 1.2 安裝其他工具
+
+```bash
+sudo apt install -y git curl python3 nginx certbot python3-certbot-nginx
+```
+
+逐項確認，每一行都要印出版本號，沒有 `command not found`：
+
+```bash
+git --version
+```
+
+要看到 `git version 2.` 開頭。
+
+```bash
+curl --version
+```
+
+第一行要看到 `curl 7.` 或 `curl 8.` 開頭。
+
+```bash
+python3 --version
+```
+
+要看到 `Python 3.` 開頭。
+
+```bash
+nginx -v
+```
+
+要看到 `nginx version: nginx/` 開頭。
+
+```bash
+certbot --version
+```
+
+要看到 `certbot` 加版本號，例如 `certbot 2.9.0`。
 
 ---
 
@@ -74,7 +156,7 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-用 `nano .env` 打開，**至少**要改這幾個：
+用 `nano .env` 打開。用方向鍵移動、直接打字修改；改完按 `Ctrl+O` 再按 Enter 存檔，最後按 `Ctrl+X` 離開。**至少**要改這幾個，每一個都要改，漏掉的欄位不會有任何報錯（例如 `BRIDGE_TOKEN` 還留著 `change-me-bridge-token`），之後才會出問題：
 
 | 欄位 | 填什麼 |
 |---|---|
@@ -90,7 +172,7 @@ chmod 600 .env
 | `BRIDGE_TOKEN` | 閘道呼叫訂閱橋接用，亂數。不裝橋接也填一個 |
 | 供應商金鑰 | 手上有哪一把就填哪一把，其他保留 `placeholder` |
 
-每一個「亂數」都用這行產生一個新的，不要共用同一個：
+每一個「亂數」（包括 `AUTH_SECRET`）都用這行產生一個新的，不要共用同一個：
 
 ```bash
 openssl rand -hex 24
@@ -112,7 +194,7 @@ openssl rand -hex 24
    https://cost.example.com/api/auth/callback/google
    ```
 
-   （換成你自己的儀表板網域）
+   （換成你自己的儀表板網域。要與 `.env` 的 `AUTH_URL` 完全一致，結尾不要多一個斜線，否則登入時會出現 `redirect_uri_mismatch`）
 4. 建立後把「用戶端 ID」填進 `.env` 的 `AUTH_GOOGLE_ID`，「用戶端密鑰」填進 `AUTH_GOOGLE_SECRET`。
 
 第一次設定 OAuth 同意畫面時，發布狀態選「測試中」並把自己加進測試使用者即可，不需要送審。
@@ -131,13 +213,25 @@ mkdir -p /opt/costscale/spool/upstream-keys
 chown 1001 /opt/costscale/spool/upstream-keys && chmod 700 /opt/costscale/spool/upstream-keys
 ```
 
-啟動全部服務（第一次要建置儀表板，約 3 到 5 分鐘）：
+閘道的 Vertex AI 服務帳戶金鑰固定掛載主機上的 `/root/vertex-sa.json`。**不用 Vertex 也要先建一個空檔**，否則 Docker 會在主機上建出一個同名的「資料夾」，之後放不進真的金鑰檔。要用 Vertex 時，直接把真的金鑰檔覆蓋到這個路徑：
+
+```bash
+touch /root/vertex-sa.json
+```
+
+啟動全部服務（第一次要下載映像並建置儀表板，約 3 到 5 分鐘，網路慢會更久，中間沒有進度提示，請等它跑完）：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d --build
 ```
 
-> **這台主機上的每一個 compose 指令都要帶這兩個 `-f` 和 `--profile full`。** 漏掉覆寫檔會用開發用的埠位建容器。
+建置時會連 `fonts.googleapis.com` 下載字型。建置失敗，且錯誤訊息含 `font/google` 時，原樣重跑同一行指令即可；建置步驟本身已經自動重試 3 次，仍失敗時請先確認主機連得上外網。
+
+> **這台主機上的每一個 compose 指令都要帶這兩個 `-f` 和 `--profile full`。** 漏掉覆寫檔會用開發用的埠位建容器。之後看紀錄也一樣，例如：
+>
+> ```bash
+> docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full logs --tail 50 dashboard
+> ```
 
 資料庫第一次啟動時會自動建好所有資料表（`db/init/` 底下的檔案依序執行）。
 
@@ -238,6 +332,10 @@ sudo ln -s /etc/nginx/sites-available/costscale /etc/nginx/sites-enabled/costsca
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+`nginx -t` 會印出有問題的檔名與行號；沒有看到 `syntax is ok` 與 `test is successful` 兩行就不要往下做，先照它指的檔案與行號修正。
+
+申請憑證前，兩個網域的 A 紀錄要已經生效（第 1 節）：
+
 ```bash
 sudo certbot --nginx -d cost.example.com -d llm.example.com
 ```
@@ -253,11 +351,15 @@ sudo certbot --nginx -d cost.example.com -d llm.example.com
 
   要回 `404`。回 `401` 或 `200` 代表管理 API 露出去了，回頭檢查 nginx 設定。
 
+  用 Windows PowerShell 的話，要把 `curl` 改成 `curl.exe`，並把 `-w '%{http_code}\n'` 改成 `-w "%{http_code}"`。`curl` 在 PowerShell 裡是另一個指令，語法不同。
+
 ---
 
 ## 7. 排程
 
-用 root 執行 `crontab -e`，貼上下面這段。每一行做什麼寫在註解裡，用不到的可以刪掉。
+用 root 執行 `crontab -e`。第一次執行會先問你要用哪個編輯器，選 `nano`（輸入它前面的編號再按 Enter）；選到 `vim` 的話，按 `Esc`，輸入 `:q!` 再按 Enter 可以離開重來。
+
+先貼上「必要」這一段。每一行做什麼寫在註解裡：
 
 ```cron
 # 儀表板「新增／移除上游金鑰」的佇列：每分鐘套用一次
@@ -269,12 +371,18 @@ sudo certbot --nginx -d cost.example.com -d llm.example.com
 # 匯率（台幣顯示用）與訂閱月費入帳。每小時跑：扣款日當天才新增的訂閱，最晚一小時內入帳。
 # 匯率每天只抓一次，同一天重跑不會重複入帳
 20 * * * * /opt/costscale/scripts/run-fx-fetch.sh >> /var/log/costscale-fx.log 2>&1
-# 訂閱剩餘額度（有裝訂閱橋接才需要）
+```
+
+下面 4 行是「選用」，**先完成註解寫的那一節的設定，再貼上**。沒設定就貼上的話，`run-gcp-fetch.sh` 與 `run-billing-fetch.sh` 每次都會失敗並寫進記錄檔：
+
+```cron
+# 訂閱剩餘額度。先完成第 9 節（訂閱橋接）
 */15 * * * * /opt/costscale/scripts/run-sub-usage-fetch.sh >> /var/log/costscale-sub-usage.log 2>&1
-# 專案看板同步 GitHub（有用看板才需要）
+# 專案看板同步 GitHub。先完成第 11 節，並在 .env 填 GITHUB_TOKEN
 */30 * * * * /opt/costscale/scripts/run-board-sync.sh >> /var/log/costscale-board.log 2>&1
-# Vertex 用量與 GCP 帳單（有用 Google Cloud 才需要）
+# Vertex 用量。先在 .env 填 GCP_PROJECT，並把真的服務帳戶金鑰放到 /root/vertex-sa.json（見第 5 節）
 17 * * * * /opt/costscale/scripts/run-gcp-fetch.sh >> /var/log/costscale-gcp.log 2>&1
+# GCP 帳單。先在 .env 填 BQ_JOB_PROJECT，並把真的服務帳戶金鑰放到 /root/vertex-sa.json（見第 5 節）
 40 6 * * * /opt/costscale/scripts/run-billing-fetch.sh >> /var/log/costscale-billing.log 2>&1
 ```
 
@@ -290,7 +398,7 @@ chmod +x /opt/costscale/scripts/*.sh /opt/costscale/deploy/*.sh
 /opt/costscale/scripts/run-fx-fetch.sh
 ```
 
-沒有錯誤訊息，儀表板上的台幣金額就會出現。
+第一次執行要先下載 `python:3.12-slim` 映像再安裝套件，會等一到數分鐘，畫面看起來像卡住，請等它跑完。最後兩行應該是類似 `匯率 1 USD = 32.97 TWD（來源 open.er-api）` 與 `今天沒有到期的訂閱扣款`，儀表板上的台幣金額就會出現。中間出現 `WARNING: Running pip as the 'root' user` 是 pip 的提醒，可以忽略。
 
 ---
 

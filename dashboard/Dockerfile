@@ -10,7 +10,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+# 建置時 next/font/google 要連 fonts.googleapis.com 下載字型，暫時連不上會讓建置失敗。
+# 最多試 3 次，成功就立刻結束；建置內容不變，只是不必人工重跑。
+RUN for i in 1 2 3; do npm run build && exit 0; echo "建置失敗（第 $i 次），5 秒後重試" >&2; sleep 5; done; exit 1
 
 FROM node:24-alpine AS runner
 WORKDIR /app
