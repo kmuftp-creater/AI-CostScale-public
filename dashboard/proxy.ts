@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { authSecretProblem } from "@/lib/secret-check";
+import { noteAuthDisabledPass } from "@/lib/security-env";
 
 /**
  * Next.js 16 把 middleware.js 重新命名為 proxy.js（行為相同，只是換了檔名與
@@ -14,6 +15,8 @@ import { authSecretProblem } from "@/lib/secret-check";
  */
 export async function proxy(request: NextRequest) {
   if (process.env.AUTH_DISABLED === "1") {
+    // 放行時留一行警告（有節流）；每一頁最上方另有醒目橫幅（components/SecurityBanner.tsx）。
+    noteAuthDisabledPass();
     return NextResponse.next();
   }
 

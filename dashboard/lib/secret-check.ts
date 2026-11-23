@@ -45,3 +45,18 @@ export function secretProblemText(p: SecretProblem): string {
   if (p === "template") return "還是範本裡的預設值";
   return `太短（至少要 ${MIN_AUTH_SECRET_LENGTH} 個字元）`;
 }
+
+/**
+ * 從 DATABASE_URL（postgresql://使用者:密碼@主機:埠/資料庫）取出資料庫密碼，回傳它的問題；沒問題或讀不出來回 null。
+ * 儀表板容器拿不到 DB_PASSWORD 本身，只拿得到組好的 DATABASE_URL，所以從這裡判斷「資料庫密碼是不是範本值」。
+ */
+export function dbPasswordProblem(databaseUrl: string | undefined | null): SecretProblem | null {
+  const url = (databaseUrl ?? "").trim();
+  if (url === "") return null;
+  try {
+    const pw = decodeURIComponent(new URL(url).password);
+    return secretProblem(pw);
+  } catch {
+    return null;
+  }
+}

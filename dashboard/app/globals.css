@@ -2054,6 +2054,36 @@ footer .sep {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+/* 安全警告橫幅（登入檢查已關閉、主金鑰或資料庫密碼是範本值）。底色與框線沿用 .budget-banner.critical。 */
+.sec-banner {
+  align-items: flex-start;
+}
+.sec-banner-body {
+  flex: 1 1 20rem;
+  color: var(--ink);
+}
+.sec-banner-fix {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.8rem;
+  color: var(--ink-2, var(--ink));
+}
+.sec-banner-fix li {
+  margin: 0.15rem 0;
+  word-break: break-all;
+}
+.sec-banners.compact {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+}
+.sec-banners.compact .budget-banner {
+  margin-bottom: 0;
+  border-radius: 0;
+}
+
 .budget-banner-link {
   flex: none;
   color: var(--accent);

@@ -3,6 +3,7 @@ import path from "node:path";
 import { Orbitron } from "next/font/google";
 import { getBigScreenData } from "@/lib/bigscreen";
 import BigScreenClient from "./BigScreenClient";
+import SecurityBanner from "@/components/SecurityBanner";
 import { SKIN_CLASS, parseSkin, ASSET_SLOTS, type Assets } from "./skins";
 import "./bigscreen.css";
 
@@ -58,6 +59,8 @@ export default async function BigScreenPage({ searchParams }: { searchParams: Pr
   const assets = collectAssets();
   return (
     <div className={`bs ${urlSkin ? SKIN_CLASS[urlSkin].join(" ") : ""} ${orbitron.variable}`}>
+      {/* 大屏沒有頁首，安全警告（登入檢查已關閉等）改成貼在畫面最上緣的細條 */}
+      <SecurityBanner compact />
       {/* 把 next/font 產生的真實字型名稱傳下去給 ECharts。ECharts 量字寬用 canvas，
           看不懂 CSS 變數；傳 var(--font-orbitron) 的話它會用預設字型去量，
           實際畫出來的 Orbitron 比較寬，相鄰文字就疊在一起（2026-09-12 排行的金額）。 */}

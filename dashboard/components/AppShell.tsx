@@ -10,6 +10,7 @@ import ReminderBanner from "./ReminderBanner";
 import ModelExpiryBanner from "./ModelExpiryBanner";
 import CreditBanner from "./CreditBanner";
 import SpikeBanner from "./SpikeBanner";
+import SecurityBanner from "./SecurityBanner";
 
 async function doSignOut() {
   "use server";
@@ -67,6 +68,10 @@ export default function AppShell({
       </header>
 
       <main>
+        {/* 安全警告固定在最上方：登入檢查關閉、主金鑰或資料庫密碼是範本值時顯示，其餘情況什麼都不渲染 */}
+        <Suspense fallback={null}>
+          <SecurityBanner />
+        </Suspense>
         {/* 預算超標時全站可見；資料庫不通或無預算時這裡什麼都不會渲染 */}
         <Suspense fallback={null}>
           <BudgetBanner />
