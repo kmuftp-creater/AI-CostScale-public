@@ -8,8 +8,11 @@
 # 設計原則：
 #   - 可以重複執行。每一步先檢查「是不是已經做好」，做好的就跳過。
 #   - 既有的 .env 不覆蓋、不改已有的值，只補缺少的欄位。
+#     唯一的例外是 AUTH_DISABLED：不是 0 就改回 0。設成 1 等於任何人不用登入就能看
+#     花費與金鑰，所以每次執行都會改回 0，並在畫面上印出原因。
 #   - 不刪資料庫 volume、不 down -v、不動防火牆與 SSH、不把金鑰寫進版控的檔案。
 #   - 金鑰與亂數不印到畫面，也不寫進 log。
+#   - apt 與 docker 的大量輸出只寫進 log，畫面只顯示進度；任何一步失敗會自動印出 log 最後 30 行。
 
 set -Eeuo pipefail
 
@@ -23,11 +26,13 @@ readonly SITE_NAME="costscale"
 readonly CRON_BEGIN="# >>> costscale install (managed block, do not edit) >>>"
 readonly CRON_END="# <<< costscale install (managed block) <<<"
 readonly SS_DIR="/etc/ssl/costscale"
+readonly ACME_ROOT="/var/www/costscale-acme"
 readonly SS_CA="/usr/local/share/ca-certificates/costscale-selfsigned.crt"
 readonly ORIG_ARGS="$*"
 
 TLS_MODE="letsencrypt"
 NON_INTERACTIVE=0
+SKIP_DNS_CHECK=0
 STEP_NO=0
 STEP_NAME="開始前"
 STEP_HINT="$LOG_FILE"
@@ -40,6 +45,7 @@ GOOGLE_ID=""
 GOOGLE_SECRET=""
 GEMINI_KEY=""
 LE_EMAIL=""
+NEW_ENV=0
 
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full)
 COMPOSE_STR="docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full"
@@ -72,8 +78,43 @@ rerun_cmd() {
   fi
 }
 
+# 把 stdin 裡出現的 .env 祕密值換成 ***（欄位名含 PASSWORD、SECRET、KEY、TOKEN，值長度 8 以上）
+redact() {
+  local envf="$APP_DIR/.env"
+  if [ -f "$envf" ]; then
+    awk '
+      NR == FNR {
+        i = index($0, "=")
+        if (i > 0) {
+          k = substr($0, 1, i - 1); v = substr($0, i + 1)
+          if (k ~ /(PASSWORD|SECRET|KEY|TOKEN)/ && length(v) >= 8 && v != "placeholder" && v !~ /^change-me/ && v !~ /^sk-change-me/) sec[++n] = v
+        }
+        next
+      }
+      {
+        line = $0
+        for (j = 1; j <= n; j++) {
+          while ((p = index(line, sec[j])) > 0) line = substr(line, 1, p - 1) "***" substr(line, p + length(sec[j]))
+        }
+        print line
+      }' "$envf" -
+  else
+    cat
+  fi
+}
+
+# 失敗時印出 log 最後 30 行（已去掉 .env 的祕密值）與 log 檔路徑
+show_log_tail() {
+  [ -s "$LOG_FILE" ] || return 0
+  printf '\n  紀錄檔 %s 的最後 30 行：\n' "$LOG_FILE"
+  tail -n 30 "$LOG_FILE" 2>/dev/null | redact | sed 's/^/    | /'
+  printf '  完整紀錄檔：%s\n' "$LOG_FILE"
+}
+
 # die <原因> [該看哪裡]
 die() {
+  # 先印 log 尾巴（此時 log 裡還沒有下面這段訊息），原因與重跑指令留在畫面最底下
+  case "${2:-$STEP_HINT}" in "不需要看紀錄"*) ;; *) show_log_tail ;; esac
   say ""
   say "安裝在「第 ${STEP_NO} 步：${STEP_NAME}」停住了。"
   say "  原因：$1"
@@ -85,6 +126,7 @@ die() {
 
 on_err() {
   local code=$? line=$1
+  show_log_tail
   say ""
   say "安裝在「第 ${STEP_NO} 步：${STEP_NAME}」發生未預期的錯誤（腳本第 ${line} 行，結束碼 ${code}）。"
   say "  該看哪裡：${STEP_HINT}"
@@ -94,9 +136,38 @@ on_err() {
 }
 trap 'on_err $LINENO' ERR
 
-# 執行會輸出大量文字的指令：畫面與 log 都看得到。pipefail 會把失敗傳出來。
+# 執行會輸出大量文字的指令：完整輸出只寫進 log（已去掉祕密值），畫面只顯示一行進度。
+# 用法：run_logged <一句話說明> <指令...>
+# 指令失敗時傳回它的結束碼，由呼叫端的 die 或 ERR 處理印出 log 最後 30 行。
 run_logged() {
-  "$@" 2>&1 | tee -a "$LOG_FILE"
+  local desc="$1" out pid hb="" rc=0 t0=$SECONDS
+  shift
+  out=$(mktemp)
+  printf '  進行中：%s（完整輸出寫在紀錄檔，不顯示在畫面）\n' "$desc"
+  printf '  進行中：%s\n' "$desc" >>"$LOG_FILE" 2>/dev/null || true
+  "$@" </dev/null >"$out" 2>&1 &
+  pid=$!
+  if [ -t 1 ]; then
+    (
+      while kill -0 "$pid" 2>/dev/null; do
+        sleep 5
+        if kill -0 "$pid" 2>/dev/null; then printf '\r    已進行 %d 秒…' "$((SECONDS - t0))"; fi
+      done
+    ) &
+    hb=$!
+  fi
+  wait "$pid" || rc=$?
+  if [ -n "$hb" ]; then
+    kill "$hb" 2>/dev/null || true
+    wait "$hb" 2>/dev/null || true
+    printf '\r%40s\r' ''
+  fi
+  redact <"$out" >>"$LOG_FILE" 2>/dev/null || true
+  rm -f "$out"
+  if [ "$rc" -eq 0 ]; then
+    printf '  完成：%s（%d 秒）\n' "$desc" "$((SECONDS - t0))"
+  fi
+  return "$rc"
 }
 
 usage() {
@@ -116,21 +187,28 @@ AI CostScale 互動式安裝腳本
         letsencrypt（預設）  向 Let's Encrypt 申請正式憑證。兩個網域的 DNS 要先指到這台主機。
                               選這個模式並繼續，代表同意 Let's Encrypt 的使用條款。
         selfsigned           產生自簽憑證，只供內網或測試使用，瀏覽器會顯示不安全。
+                              會把這張憑證加入這台主機的系統信任庫（排程腳本才連得上自己的 HTTPS）。
         skip                 不動 nginx，你自己處理 HTTPS。
+  --skip-dns-check
+        略過 letsencrypt 模式的 DNS 比對。網域經過 Cloudflare 代理（橘色雲朵），或這台主機在
+        NAT 後面、解析到的 IP 本來就不是主機的對外 IP 時使用。申請憑證時，Let's Encrypt 仍要能
+        從外網連到這台主機的 80 埠。
   --non-interactive
         不問問題，全部答案改由環境變數提供：
           CS_DASH_DOMAIN       儀表板網域，例如 cost.example.com
           CS_GW_DOMAIN         閘道網域，例如 llm.example.com
           CS_ALLOWED_EMAILS    可登入的 Google 帳號，逗號分隔
           CS_GOOGLE_ID         Google OAuth 用戶端 ID（可省略，之後再補）
-          CS_GOOGLE_SECRET     Google OAuth 用戶端密鑰（可省略，之後再補）
+          CS_GOOGLE_SECRET     Google OAuth 用戶端密鑰（有 ID 才會用到；可省略，之後再補）
           CS_GEMINI_FREE_KEY   Gemini 免費金鑰（可省略）
           CS_LE_EMAIL          Let's Encrypt 通知信箱（letsencrypt 模式且尚未有憑證時必填）
+        信箱只收英數與 . _ % + -，白名單用逗號分隔；ID、密鑰、金鑰不能含空白、引號、$、反引號。
         .env 已經有的欄位不需要再提供。
   -h, --help
         顯示這段說明。
 
-可以重複執行：做好的步驟會跳過，既有的 .env 不會被覆蓋。
+可以重複執行：做好的步驟會跳過，既有的 .env 不會被覆蓋（唯一的例外：AUTH_DISABLED 不是 0 會被改回 0）。
+apt 與 docker 的大量輸出只寫進紀錄檔，畫面只顯示進度；任何一步失敗會自動印出紀錄檔最後 30 行。
 紀錄檔：/var/log/costscale-install.log（不含任何金鑰）
 EOF
 }
@@ -140,6 +218,7 @@ EOF
 while [ $# -gt 0 ]; do
   case "$1" in
     --non-interactive) NON_INTERACTIVE=1 ;;
+    --skip-dns-check) SKIP_DNS_CHECK=1 ;;
     --tls)
       shift
       [ $# -gt 0 ] || { echo "--tls 後面要接 letsencrypt、selfsigned 或 skip" >&2; exit 2; }
@@ -158,11 +237,22 @@ esac
 
 # ────────────────────────────── 通用工具 ──────────────────────────────
 
-# 值是否「還沒填」：空、placeholder、範本裡的 change-me、範例網域
+# 值是否「還沒填」：空、placeholder、範本裡的 change-me、.env.example 裡的兩個預設網址。
+# 只比對確切的預設值，不用「含 example.com」這種子字串，使用者填的 you@example.com 不會被誤判。
 is_unset() {
   local v="${1:-}"
   case "$v" in
-    ""|placeholder|change-me*|sk-change-me*|*example.com*) return 0 ;;
+    ""|placeholder|change-me*|sk-change-me*|https://cost.example.com|https://llm.example.com) return 0 ;;
+  esac
+  return 1
+}
+
+# 登入白名單是否「還沒填」：只有空或 change-me。.env.example 的預設值 you@example.com 與使用者
+# 自己填的同一個字串分不出來，所以不當成未填；全新安裝時由 build_env 直接以你的答案寫入。
+mail_unset() {
+  local v="${1:-}"
+  case "$v" in
+    ""|change-me*) return 0 ;;
   esac
   return 1
 }
@@ -226,7 +316,7 @@ svc_start() {
       fi
       ;;
     nginx)
-      proc_running /run/nginx.pid || nginx
+      proc_running /run/nginx.pid || nginx >>"$LOG_FILE" 2>&1
       ;;
     cron)
       proc_running /run/crond.pid || cron
@@ -242,7 +332,7 @@ svc_reload() {
   fi
   case "$name" in
     nginx)
-      if proc_running /run/nginx.pid; then nginx -s reload; else nginx; fi
+      if proc_running /run/nginx.pid; then nginx -s reload >>"$LOG_FILE" 2>&1; else nginx >>"$LOG_FILE" 2>&1; fi
       ;;
   esac
 }
@@ -339,16 +429,29 @@ label_of() {
 }
 
 chk_domain() { valid_domain "$(norm_domain "$1")"; }
+
+# 信箱：只收英數與 . _ % + -，加 @ 與網域。逗號前後的空白會去掉，其餘位置有空白就不合格。
+norm_emails() { printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]*,[[:space:]]*/,/g'; }
+chk_email() { [[ "$1" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; }
 chk_emails() {
   local list e
-  list=$(printf '%s' "$1" | tr -d '[:space:]')
+  case "$1" in *$'\n'*) return 1 ;; esac
+  list=$(norm_emails "$1")
   [ -n "$list" ] || return 1
+  case "$list" in ,*|*,|*,,*) return 1 ;; esac
   IFS=',' read -r -a _chk_mails <<<"$list"
   for e in "${_chk_mails[@]}"; do
-    [[ "$e" =~ ^[^@,]+@[^@,]+\.[^@,]+$ ]] || return 1
+    chk_email "$e" || return 1
   done
 }
-chk_email() { [[ "$1" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; }
+
+# 會原樣寫進 .env 的自由輸入（Google ID、密鑰、Gemini 金鑰）：不得含空白、引號、$、反引號、換行
+chk_safe() {
+  case "$1" in
+    *[[:space:]]*|*\"*|*\'*|*\`*|*\$*) return 1 ;;
+  esac
+  return 0
+}
 
 # ask <變數名> <環境變數名> <說明> <必填 1|0> <祕密 1|0> <檢查函式> <格式說明>
 # 互動模式格式不對會請你重填；非互動模式格式不對直接報錯結束。
@@ -390,7 +493,7 @@ ask() {
 }
 
 collect_answers() {
-  step "回答幾個問題（已經寫在 .env 裡的項目會直接沿用，不再問）"
+  step "回答幾個問題（答案會存進 ${APP_DIR}/.env 這個設定檔；已經填過的項目會直接沿用，不再問）"
   [ "$NON_INTERACTIVE" -eq 1 ] && say "  非互動模式：答案從 CS_ 開頭的環境變數讀取"
 
   if [ "$NON_INTERACTIVE" -eq 0 ] && [ ! -t 0 ]; then
@@ -409,27 +512,31 @@ collect_answers() {
   fi
 
   if is_unset "$cur_url"; then
-    ask DASH_DOMAIN CS_DASH_DOMAIN "儀表板的網域（例如 cost.example.com）。要先在 DNS 服務商建一筆 A 紀錄指向這台主機。" 1 0 chk_domain "要像 cost.example.com，不含 https:// 與斜線"
+    ask DASH_DOMAIN CS_DASH_DOMAIN "儀表板的網域（例如 cost.example.com）。要先在 DNS 服務商建一筆 A 紀錄指向這台主機。" 1 0 chk_domain "要像 cost.example.com；貼整個網址也可以，腳本會自動去掉前面的 https:// 與後面的斜線"
     DASH_DOMAIN=$(norm_domain "$DASH_DOMAIN")
   else
     DASH_DOMAIN=$(norm_domain "$cur_url")
     say "  沿用 .env 的儀表板網域：$DASH_DOMAIN"
   fi
-  valid_domain "$DASH_DOMAIN" || die "儀表板網域格式不對：$DASH_DOMAIN（要像 cost.example.com，不含 https:// 與斜線）" "不需要看紀錄"
+  valid_domain "$DASH_DOMAIN" || die "儀表板網域格式不對：$DASH_DOMAIN（要像 cost.example.com；前面的 https:// 與後面的斜線會自動去掉）" "不需要看紀錄"
 
   if is_unset "$cur_gw"; then
-    ask GW_DOMAIN CS_GW_DOMAIN "閘道的網域（例如 llm.example.com）。要與儀表板網域不同，DNS 也要指向這台主機。" 1 0 chk_domain "要像 llm.example.com，不含 https:// 與斜線"
-    GW_DOMAIN=$(norm_domain "$GW_DOMAIN")
+    while :; do
+      ask GW_DOMAIN CS_GW_DOMAIN "閘道的網域（例如 llm.example.com）。要與儀表板網域不同，DNS 也要指向這台主機。" 1 0 chk_domain "要像 llm.example.com；貼整個網址也可以，腳本會自動去掉前面的 https:// 與後面的斜線"
+      GW_DOMAIN=$(norm_domain "$GW_DOMAIN")
+      [ "$GW_DOMAIN" != "$DASH_DOMAIN" ] || [ "$NON_INTERACTIVE" -eq 1 ] && break
+      echo "  閘道網域不能和儀表板網域相同（現在兩個都是 $DASH_DOMAIN）。請輸入另一個網域。"
+    done
   else
     GW_DOMAIN=$(norm_domain "$cur_gw")
     say "  沿用 .env 的閘道網域：$GW_DOMAIN"
   fi
-  valid_domain "$GW_DOMAIN" || die "閘道網域格式不對：$GW_DOMAIN（要像 llm.example.com，不含 https:// 與斜線）" "不需要看紀錄"
+  valid_domain "$GW_DOMAIN" || die "閘道網域格式不對：$GW_DOMAIN（要像 llm.example.com；前面的 https:// 與後面的斜線會自動去掉）" "不需要看紀錄"
   [ "$DASH_DOMAIN" != "$GW_DOMAIN" ] || die "儀表板與閘道要用兩個不同的網域，現在兩個都是 $DASH_DOMAIN" "不需要看紀錄"
 
-  if is_unset "$cur_mail"; then
-    ask ALLOWED_EMAILS CS_ALLOWED_EMAILS "可以登入儀表板的 Google 帳號，多個用逗號分隔（例如 you@example.com,boss@example.com）。只有這些帳號登得進去。" 1 0 chk_emails "要像 you@example.com，多個用逗號分隔"
-    ALLOWED_EMAILS=$(printf '%s' "$ALLOWED_EMAILS" | tr -d '[:space:]')
+  if mail_unset "$cur_mail"; then
+    ask ALLOWED_EMAILS CS_ALLOWED_EMAILS "可以登入儀表板的 Google 帳號，多個用逗號分隔（例如 you@example.com,boss@example.com）。只有這些帳號登得進去。" 1 0 chk_emails "只收英數與 . _ % + - 加上 @ 與網域，要像 you@example.com，多個用逗號分隔"
+    ALLOWED_EMAILS=$(norm_emails "$ALLOWED_EMAILS")
   else
     ALLOWED_EMAILS="$cur_mail"
     say "  沿用 .env 的登入白名單"
@@ -438,15 +545,16 @@ collect_answers() {
   if is_unset "$cur_gid" || is_unset "$cur_gsec"; then
     if [ "$NON_INTERACTIVE" -eq 0 ]; then
       say ""
-      say "  Google 登入需要一組 OAuth 用戶端（INSTALL.md 第 4 節有完整步驟）："
-      say "    1. Google Cloud Console →「API 和服務」→「憑證」→「建立憑證」→「OAuth 用戶端 ID」，類型選「網頁應用程式」。"
-      say "    2. 「已授權的重新導向 URI」填下面這一行，一個字都不要多（結尾不能有斜線）："
+      say "  Google 登入要先在 Google 建立一組「OAuth 用戶端」：白話說，就是讓 Google 認得你這個儀表板、"
+      say "  願意讓使用者用 Google 帳號登入它的一組身分，會拿到「用戶端 ID」與「用戶端密鑰」兩個值（INSTALL.md 第 4 節有完整步驟）："
+      say "    1. 用瀏覽器開 https://console.cloud.google.com/apis/credentials ，選好專案，按「建立憑證」→「OAuth 用戶端 ID」，應用程式類型選「網頁應用程式」。"
+      say "    2. 「已授權的重新導向 URI」（Google 登入完成後要跳回儀表板的網址）填下面這一行，一個字都不要多（結尾不能有斜線）："
       say "         https://${DASH_DOMAIN}/api/auth/callback/google"
       say "    3. 建立後會得到「用戶端 ID」與「用戶端密鑰」。還沒準備好可以先跳過，裝好之後再補。"
     fi
-    ask GOOGLE_ID CS_GOOGLE_ID "Google OAuth 用戶端 ID（長得像 123456-abc.apps.googleusercontent.com）。" 0
+    ask GOOGLE_ID CS_GOOGLE_ID "Google OAuth 用戶端 ID（長得像 123456-abc.apps.googleusercontent.com）。" 0 0 chk_safe "不能含空白、引號、\$ 與反引號"
     if [ -n "$GOOGLE_ID" ]; then
-      ask GOOGLE_SECRET CS_GOOGLE_SECRET "Google OAuth 用戶端密鑰（輸入時畫面不會顯示）。" 0 1
+      ask GOOGLE_SECRET CS_GOOGLE_SECRET "Google OAuth 用戶端密鑰（輸入時畫面不會顯示）。" 0 1 chk_safe "不能含空白、引號、\$ 與反引號"
     fi
     if [ -z "$GOOGLE_ID" ] || [ -z "$GOOGLE_SECRET" ]; then
       GOOGLE_ID=""; GOOGLE_SECRET=""
@@ -457,13 +565,13 @@ collect_answers() {
   fi
 
   if is_unset "$cur_gem"; then
-    ask GEMINI_KEY CS_GEMINI_FREE_KEY "Gemini 免費金鑰（到 https://aistudio.google.com/apikey 建立，可以免費拿）。裝好後用它測試第一次呼叫。輸入時畫面不會顯示。" 0 1
+    ask GEMINI_KEY CS_GEMINI_FREE_KEY "Gemini 免費金鑰（到 https://aistudio.google.com/apikey 建立，可以免費拿）。裝好後用它測試第一次呼叫。輸入時畫面不會顯示。" 0 1 chk_safe "不能含空白、引號、\$ 與反引號"
   else
     say "  沿用 .env 的 Gemini 免費金鑰"
   fi
 
   if [ "$TLS_MODE" = "letsencrypt" ] && [ ! -e "/etc/letsencrypt/live/${DASH_DOMAIN}/fullchain.pem" ]; then
-    ask LE_EMAIL CS_LE_EMAIL "Let's Encrypt 憑證要用的信箱（憑證快到期、帳號有事時它會寄信通知）。繼續即代表同意 Let's Encrypt 使用條款。" 1 0 chk_email "要像 you@example.com"
+    ask LE_EMAIL CS_LE_EMAIL "Let's Encrypt 憑證要用的信箱（憑證快到期、帳號有事時它會寄信通知）。繼續即代表同意 Let's Encrypt 使用條款。" 1 0 chk_email "只收英數與 . _ % + - 加上 @ 與網域，要像 you@example.com"
   fi
   say "  問答完成。接下來不用再回答，可以等它跑完（首次約 5 到 10 分鐘）。"
 }
@@ -473,14 +581,14 @@ collect_answers() {
 pkg_installed() { dpkg -s "$1" >/dev/null 2>&1; }
 
 install_tools() {
-  step "安裝缺少的工具（Docker、git、curl、python3、nginx、certbot、cron）"
+  step "安裝缺少的工具（Docker、git、curl、python3、nginx、certbot、cron；畫面只顯示進度，完整輸出在紀錄檔）"
   STEP_HINT="$LOG_FILE（apt 的完整輸出都在裡面）"
   export DEBIAN_FRONTEND=noninteractive
 
   local apt_updated=0
   apt_update_once() {
     if [ "$apt_updated" -eq 0 ]; then
-      run_logged apt-get update
+      run_logged "更新 apt 套件清單" apt-get update
       apt_updated=1
     fi
   }
@@ -492,7 +600,7 @@ install_tools() {
   if [ "${#pkgs[@]}" -gt 0 ]; then
     say "  安裝：${pkgs[*]}"
     apt_update_once
-    run_logged apt-get install -y "${pkgs[@]}"
+    run_logged "安裝 ${pkgs[*]}" apt-get install -y "${pkgs[@]}"
   else
     say "  一般工具都已經有了，跳過"
   fi
@@ -512,11 +620,11 @@ install_tools() {
     codename=$(. /etc/os-release && printf '%s' "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
     arch=$(dpkg --print-architecture)
     printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' "$arch" "$codename" >/etc/apt/sources.list.d/docker.list
-    run_logged apt-get update
+    run_logged "更新 apt 套件清單（加入 Docker 套件庫後）" apt-get update
     if [ "$need_docker" -eq 1 ]; then
-      run_logged apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      run_logged "安裝 Docker Engine 與 Compose 外掛" apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     else
-      run_logged apt-get install -y docker-compose-plugin
+      run_logged "安裝 Docker Compose 外掛" apt-get install -y docker-compose-plugin
     fi
   else
     say "  Docker 與 Compose 外掛已經有了，跳過"
@@ -566,6 +674,7 @@ build_env() {
     say "  還沒有 .env：以 .env.example 為底建立"
     cp .env.example .env
     chmod 600 .env
+    NEW_ENV=1
     # 新建的 .env 裡，下面這些一定重新產生
     env_set DB_PASSWORD "$(rand_hex)"
     env_set LITELLM_MASTER_KEY "sk-$(rand_hex)"
@@ -604,7 +713,12 @@ build_env() {
 
   env_fill AUTH_URL "https://${DASH_DOMAIN}"
   env_fill GATEWAY_PUBLIC_URL "https://${GW_DOMAIN}"
-  [ -z "$ALLOWED_EMAILS" ] || env_fill AUTH_ALLOWED_EMAILS "$ALLOWED_EMAILS"
+  # 白名單：全新的 .env 一定寫入你的答案（範本預設值 you@example.com 不算你填的）；既有 .env 只補空值
+  if [ -n "$ALLOWED_EMAILS" ]; then
+    if [ "$NEW_ENV" -eq 1 ] || ! env_has AUTH_ALLOWED_EMAILS || mail_unset "$(env_get AUTH_ALLOWED_EMAILS)"; then
+      env_set AUTH_ALLOWED_EMAILS "$ALLOWED_EMAILS"
+    fi
+  fi
   if [ -n "$GOOGLE_ID" ] && [ -n "$GOOGLE_SECRET" ]; then
     env_fill AUTH_GOOGLE_ID "$GOOGLE_ID"
     env_fill AUTH_GOOGLE_SECRET "$GOOGLE_SECRET"
@@ -617,10 +731,18 @@ build_env() {
     env_fill GEMINI_FREE_KEY_1 "$GEMINI_KEY"
   fi
 
-  # 正式環境一定要 0：這個欄位不是「補缺」，是安全底線
-  if [ "$(env_get AUTH_DISABLED)" != "0" ]; then
+  # 正式環境一定要 0：這個欄位不是「補缺」，是安全底線，也是本腳本「不改已有的值」的唯一例外
+  local cur_auth
+  cur_auth=$(env_get AUTH_DISABLED)
+  if [ "$cur_auth" != "0" ]; then
     env_set AUTH_DISABLED 0
-    say "  AUTH_DISABLED 設為 0（正式環境一定要開啟登入）"
+    if [ -n "$cur_auth" ]; then
+      say "  偵測到 AUTH_DISABLED=${cur_auth}，已改回 0。原因：設成 1 代表儀表板不用登入，任何人連得到網址就能看花費、發金鑰；"
+      say "  這個腳本是安裝正式環境用的，所以每次執行都把它改回 0。這是「不改 .env 已有的值」的唯一例外。"
+      say "  只在本機或內網測試、確定要關掉登入時，請在腳本跑完後手動改回 1，再執行 ${COMPOSE_STR} up -d。"
+    else
+      say "  AUTH_DISABLED 原本沒有值，已設為 0（正式環境一定要開啟登入）"
+    fi
   fi
   chmod 600 .env
   say "  .env 權限：$(stat -c '%a' .env)"
@@ -670,7 +792,7 @@ start_stack() {
 
   local attempt ok=0
   for attempt in 1 2 3; do
-    if run_logged "${COMPOSE[@]}" up -d --build; then
+    if run_logged "建置並啟動服務（首次要下載映像與建置儀表板，需數分鐘）" "${COMPOSE[@]}" up -d --build; then
       ok=1
       break
     fi
@@ -744,31 +866,61 @@ server {
 EOF
 )
 
-gen_site() { # gen_site <mode>
-  local mode="$1" listen out
-  if [ "$mode" = "selfsigned" ]; then
-    listen="listen 443 ssl;
-    ssl_certificate ${SS_DIR}/fullchain.pem;
-    ssl_certificate_key ${SS_DIR}/privkey.pem;"
-  else
-    listen="listen 80;"
+# gen_site <mode>：acme（憑證申請中，只回應驗證路徑）、letsencrypt（正式）、selfsigned
+gen_site() {
+  local mode="$1" listen out cdir acme_loc=""
+  if [ "$mode" = "acme" ]; then
+    cat <<EOF
+# 由 scripts/install.sh 產生（TLS 模式：letsencrypt，憑證申請中）。
+# 這一段只回應 Let's Encrypt 的驗證路徑，其他路徑一律 404，不會把儀表板或閘道以明文提供。
+server {
+    listen 80;
+    server_name ${DASH_DOMAIN} ${GW_DOMAIN};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${ACME_ROOT};
+        default_type text/plain;
+    }
+
+    location / {
+        return 404;
+    }
+}
+EOF
+    return 0
   fi
+  if [ "$mode" = "selfsigned" ]; then
+    cdir="$SS_DIR"
+  else
+    cdir="/etc/letsencrypt/live/${DASH_DOMAIN}"
+    acme_loc="    location ^~ /.well-known/acme-challenge/ {
+        root ${ACME_ROOT};
+        default_type text/plain;
+    }
+
+"
+  fi
+  listen="listen 443 ssl;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_certificate ${cdir}/fullchain.pem;
+    ssl_certificate_key ${cdir}/privkey.pem;"
   out="${SITE_TEMPLATE//__LISTEN__/$listen}"
   out="${out//__MODE__/$mode}"
   out="${out//__DASH__/$DASH_DOMAIN}"
   out="${out//__GW__/$GW_DOMAIN}"
   printf '%s\n' "$out"
-  if [ "$mode" = "selfsigned" ]; then
-    cat <<EOF
+  cat <<EOF
 
-# 80 一律轉到 443
+# 80 一律轉到 443（letsencrypt 模式保留憑證續期用的驗證路徑）
 server {
     listen 80;
     server_name ${DASH_DOMAIN} ${GW_DOMAIN};
-    return 301 https://\$host\$request_uri;
+
+${acme_loc}    location / {
+        return 301 https://\$host\$request_uri;
+    }
 }
 EOF
-  fi
 }
 
 # 寫入前若目標已存在且內容不同，先備份成 .bak-日期時間。印出 changed／same。
@@ -799,6 +951,10 @@ public_ip() {
 
 check_dns() {
   local ip d resolved
+  if [ "$SKIP_DNS_CHECK" -eq 1 ]; then
+    say "  已加 --skip-dns-check：略過 DNS 比對，直接申請憑證（Let's Encrypt 仍要能從外網連到這台主機的 80 埠）。"
+    return 0
+  fi
   if ! ip=$(public_ip); then
     warn "查不到這台主機的對外 IP，跳過 DNS 比對，直接申請憑證；申請失敗的話請檢查兩個網域的 A 紀錄。"
     return 0
@@ -815,7 +971,7 @@ check_dns() {
     fi
   done
   if [ "$bad" -eq 1 ]; then
-    die "有網域的 DNS 還沒指到這台主機（$ip）。請到你買網域或管理 DNS 的服務商，替上面標示不對的網域各建一筆 A 紀錄，值填 $ip。記錄生效短則幾分鐘、長則幾小時，用 getent hosts <網域> 查得到 $ip 之後再繼續。其他服務都已經裝好，不用重來。" "DNS 服務商的管理頁面（A 紀錄）"
+    die "有網域的 DNS 還沒指到這台主機（$ip）。請到你買網域或管理 DNS 的服務商，替上面標示不對的網域各建一筆 A 紀錄，值填 $ip。記錄生效短則幾分鐘、長則幾小時，用 getent hosts <網域> 查得到 $ip 之後再繼續。其他服務都已經裝好，不用重來。如果你確定網域設定沒問題，只是網域經過 Cloudflare 代理（橘色雲朵）、或這台主機在 NAT 後面（解析到的 IP 本來就不是主機的對外 IP），請在同一行指令後面加上 --skip-dns-check 略過這項檢查。" "DNS 服務商的管理頁面（A 紀錄）"
   fi
 }
 
@@ -836,6 +992,7 @@ setup_selfsigned_cert() {
     local txt
     txt=$(openssl x509 -in "$SS_DIR/fullchain.pem" -noout -text 2>/dev/null || true)
     if printf '%s' "$txt" | grep -q "DNS:${DASH_DOMAIN}" && printf '%s' "$txt" | grep -q "DNS:${GW_DOMAIN}" \
+       && printf '%s' "$txt" | grep -q "CA:FALSE" \
        && openssl x509 -in "$SS_DIR/fullchain.pem" -noout -checkend 2592000 >/dev/null 2>&1; then
       need=0
     fi
@@ -844,18 +1001,54 @@ setup_selfsigned_cert() {
     openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
       -keyout "$SS_DIR/privkey.pem" -out "$SS_DIR/fullchain.pem" \
       -subj "/CN=${DASH_DOMAIN}" \
-      -addext "subjectAltName=DNS:${DASH_DOMAIN},DNS:${GW_DOMAIN}" >/dev/null 2>&1 \
+      -addext "subjectAltName=DNS:${DASH_DOMAIN},DNS:${GW_DOMAIN}" \
+      -addext "basicConstraints=critical,CA:FALSE" \
+      -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+      -addext "extendedKeyUsage=serverAuth" >/dev/null 2>&1 \
       || die "產生自簽憑證失敗。" "openssl req 的輸出"
     chmod 600 "$SS_DIR/privkey.pem"
     say "  已產生自簽憑證（$SS_DIR，只供內網或測試使用）"
   else
-    say "  自簽憑證已存在且涵蓋兩個網域，沿用"
+    say "  自簽憑證已存在且涵蓋兩個網域（非 CA 憑證），沿用"
   fi
-  # 讓這台主機自己信任它，排程腳本（check-budgets.sh 等）用 AUTH_URL 呼叫時才不會 curl 60
+  # 讓這台主機自己信任它，排程腳本（check-budgets.sh 等）用 AUTH_URL 呼叫時才不會 curl 60。
+  # 這張憑證會進入整台主機的系統信任庫，所以只適合內網或測試；它不是 CA（CA:FALSE），不能簽發別的憑證。
   if ! cmp -s "$SS_DIR/fullchain.pem" "$SS_CA" 2>/dev/null; then
     cp "$SS_DIR/fullchain.pem" "$SS_CA"
     update-ca-certificates >>"$LOG_FILE" 2>&1 || warn "update-ca-certificates 失敗，排程腳本對自簽憑證可能出現 curl 60。"
   fi
+}
+
+# 寫入站台設定並套用：舊檔內容不同先備份；nginx -t 沒過就還原、不重載
+apply_site() { # apply_site <mode>
+  local mode="$1"
+  local site_avail="/etc/nginx/sites-available/${SITE_NAME}"
+  local site_enabled="/etc/nginx/sites-enabled/${SITE_NAME}"
+  local tmp had_site=0 had_link=0 backup="" result
+  tmp=$(mktemp)
+  gen_site "$mode" >"$tmp"
+  [ -e "$site_avail" ] && had_site=1
+  [ -L "$site_enabled" ] && had_link=1
+  if [ "$had_site" -eq 1 ] && ! cmp -s "$site_avail" "$tmp"; then
+    backup="${site_avail}.bak-$(date +%Y%m%d-%H%M%S)"
+  fi
+  result=$(write_with_backup "$site_avail" "$tmp")
+  rm -f "$tmp"
+  if [ "$result" = "same" ]; then say "  站台設定沒有變動"; else say "  已寫入 $site_avail${backup:+（舊檔備份成 $backup）}"; fi
+  ln -sfn "$site_avail" "$site_enabled"
+
+  if ! nginx -t >>"$LOG_FILE" 2>&1; then
+    if [ -n "$backup" ]; then
+      cp -p "$backup" "$site_avail"
+    elif [ "$had_site" -eq 0 ]; then
+      rm -f "$site_avail"
+    fi
+    [ "$had_link" -eq 1 ] || rm -f "$site_enabled"
+    nginx -t 2>&1 | tee -a "$LOG_FILE" || true
+    die "nginx -t 沒有通過，已把站台設定還原成原狀，nginx 沒有重載。上面印的是它指出的檔名與行號。" "nginx -t（直接執行，看它指的檔名與行號）"
+  fi
+  svc_reload nginx
+  say "  nginx -t 通過，已重載"
 }
 
 setup_nginx() {
@@ -869,63 +1062,45 @@ setup_nginx() {
   fi
 
   local site_avail="/etc/nginx/sites-available/${SITE_NAME}"
-  local site_enabled="/etc/nginx/sites-enabled/${SITE_NAME}"
-  local tmp had_site=0 had_link=0 backup=""
-  tmp=$(mktemp)
+  local le_cert="/etc/letsencrypt/live/${DASH_DOMAIN}/fullchain.pem"
 
   if [ "$TLS_MODE" = "letsencrypt" ]; then
-    # 已經申請成功過：設定檔含 ssl_certificate、網域一致、憑證在，就不要重寫（會把 certbot 改好的內容洗掉）
+    # 已經申請成功過：設定檔含 ssl_certificate、網域一致、憑證在，就不要重寫
     if [ -f "$site_avail" ] && grep -q 'ssl_certificate' "$site_avail" \
        && grep -q "server_name ${DASH_DOMAIN};" "$site_avail" && grep -q "server_name ${GW_DOMAIN};" "$site_avail" \
-       && [ -e "/etc/letsencrypt/live/${DASH_DOMAIN}/fullchain.pem" ]; then
+       && [ -e "$le_cert" ]; then
       say "  Let's Encrypt 憑證與 nginx 設定都已就緒，跳過"
-      rm -f "$tmp"
       install_guard_and_snippets
       nginx -t >>"$LOG_FILE" 2>&1 || die "nginx -t 沒過。" "nginx -t"
       return 0
     fi
-    check_dns
+    [ -e "$le_cert" ] || check_dns
   fi
 
   install_guard_and_snippets
-  [ "$TLS_MODE" != "selfsigned" ] || setup_selfsigned_cert
 
-  gen_site "$TLS_MODE" >"$tmp"
-  [ -e "$site_avail" ] && had_site=1
-  [ -L "$site_enabled" ] && had_link=1
-  if [ "$had_site" -eq 1 ] && ! cmp -s "$site_avail" "$tmp"; then
-    backup="${site_avail}.bak-$(date +%Y%m%d-%H%M%S)"
+  if [ "$TLS_MODE" = "selfsigned" ]; then
+    setup_selfsigned_cert
+    apply_site selfsigned
+    return 0
   fi
-  local result
-  result=$(write_with_backup "$site_avail" "$tmp")
-  rm -f "$tmp"
-  [ "$result" = "same" ] && say "  站台設定沒有變動" || say "  已寫入 $site_avail${backup:+（舊檔備份成 $backup）}"
-  ln -sfn "$site_avail" "$site_enabled"
 
-  if ! nginx -t >>"$LOG_FILE" 2>&1; then
-    # 還原
-    if [ -n "$backup" ]; then
-      cp -p "$backup" "$site_avail"
-    elif [ "$had_site" -eq 0 ]; then
-      rm -f "$site_avail"
-    fi
-    [ "$had_link" -eq 1 ] || rm -f "$site_enabled"
-    nginx -t 2>&1 | tee -a "$LOG_FILE" || true
-    die "nginx -t 沒有通過，已把站台設定還原成原狀，nginx 沒有重載。上面印的是它指出的檔名與行號。" "nginx -t（直接執行，看它指的檔名與行號）"
-  fi
-  svc_reload nginx
-  say "  nginx -t 通過，已重載"
-
-  if [ "$TLS_MODE" = "letsencrypt" ]; then
+  # letsencrypt：憑證拿到之前，80 埠只回應驗證路徑，不把儀表板或閘道以明文對外提供
+  if [ ! -e "$le_cert" ]; then
+    mkdir -p "$ACME_ROOT"
+    chmod 755 "$ACME_ROOT"
+    say "  憑證還沒申請：先只開放 80 埠的憑證驗證路徑，其他路徑一律 404，儀表板與閘道此時不會對外提供。"
+    apply_site acme
     say "  向 Let's Encrypt 申請憑證（$DASH_DOMAIN、$GW_DOMAIN）……"
     STEP_HINT="/var/log/letsencrypt/letsencrypt.log"
-    if ! run_logged certbot --nginx --non-interactive --agree-tos -m "$LE_EMAIL" --redirect -d "$DASH_DOMAIN" -d "$GW_DOMAIN"; then
-      die "certbot 申請憑證失敗。常見原因：DNS 還沒生效、主機的 80 埠被雲端防火牆（安全群組）擋住、短時間內申請太多次。" "/var/log/letsencrypt/letsencrypt.log"
+    if ! run_logged "向 Let's Encrypt 申請憑證" certbot certonly --webroot -w "$ACME_ROOT" --non-interactive --agree-tos -m "$LE_EMAIL" -d "$DASH_DOMAIN" -d "$GW_DOMAIN" --deploy-hook "nginx -s reload"; then
+      die "certbot 申請憑證失敗。常見原因：DNS 還沒生效、主機的 80 埠被雲端防火牆（安全群組）擋住、短時間內申請太多次。目前 nginx 只回應憑證驗證路徑，儀表板與閘道沒有以明文對外提供；修好之後重新執行同一行指令。" "/var/log/letsencrypt/letsencrypt.log"
     fi
-    nginx -t >>"$LOG_FILE" 2>&1 || die "certbot 改完設定後 nginx -t 沒過。" "nginx -t"
-    svc_reload nginx
-    say "  憑證已安裝，80 自動轉 443"
+  else
+    say "  已有 Let's Encrypt 憑證，直接套用正式站台設定"
   fi
+  apply_site letsencrypt
+  say "  憑證已安裝，80 自動轉 443"
 }
 
 # ────────────────────────────── 第 8 步：排程 ──────────────────────────────
@@ -987,7 +1162,11 @@ check() { # check <說明> <指令...>
 env_required_ok() {
   local k bad=""
   for k in DB_PASSWORD LITELLM_MASTER_KEY AUTH_SECRET AUTH_URL GATEWAY_PUBLIC_URL AUTH_ALLOWED_EMAILS ALERT_CRON_TOKEN OTEL_INGEST_TOKEN BRIDGE_TOKEN; do
-    if is_unset "$(env_get "$k")"; then bad="$bad $k"; fi
+    if [ "$k" = "AUTH_ALLOWED_EMAILS" ]; then
+      mail_unset "$(env_get "$k")" && bad="$bad $k"
+    elif is_unset "$(env_get "$k")"; then
+      bad="$bad $k"
+    fi
   done
   [ -z "$bad" ] || { say "    還沒填好的欄位：$bad"; return 1; }
 }
@@ -997,6 +1176,7 @@ final_summary() {
   cd "$APP_DIR"
   STEP_HINT="$LOG_FILE"
 
+  say "  （每一項都是自動檢查：[通過] 代表正常，healthy 是容器自己回報「運作正常」；只有 [未通過] 才需要處理。）"
   check "資料庫 healthy" is_healthy db
   check "閘道 healthy" is_healthy litellm
   check "儀表板 running" is_running dashboard
@@ -1041,11 +1221,7 @@ final_summary() {
 
   if [ "$google_pending" -eq 1 ]; then
     say ""
-    say "還不能登入：Google OAuth 用戶端還沒設定。補上之後才能用儀表板："
-    say "  1. 照 INSTALL.md 第 4 節建立 OAuth 用戶端，重新導向 URI 填 https://${DASH_DOMAIN}/api/auth/callback/google"
-    say "  2. 用 nano ${APP_DIR}/.env 把 AUTH_GOOGLE_ID、AUTH_GOOGLE_SECRET 換成拿到的值（原本是 placeholder）"
-    say "  3. 在 ${APP_DIR} 執行：${COMPOSE_STR} up -d"
-    say "     （改完 .env 一定要用 up -d；restart 不會讀到新值）"
+    say "還不能登入儀表板：Google 登入設定還沒補。請先做下面「下一步」的第 1 步，再做後面的步驟。"
   fi
   if [ "$gem_pending" -eq 1 ]; then
     say ""
@@ -1060,11 +1236,24 @@ final_summary() {
 
   say ""
   say "下一步（INSTALL.md 第 8 節）："
-  say "  1. 儀表板 →「應用程式」→「新增軟體」，取個名字，複製只顯示一次的虛擬金鑰（sk- 開頭）。"
-  say "  2. 用那把金鑰打一次閘道，確認有回答："
+  local n=1
+  if [ "$google_pending" -eq 1 ]; then
+    say "  ${n}. 補上 Google 登入設定（只要做一次）："
+    say "     a. 到 https://console.cloud.google.com/apis/credentials 建立「OAuth 用戶端 ID」（類型選「網頁應用程式」，做法見 INSTALL.md 第 4 節），"
+    say "        「已授權的重新導向 URI」填 https://${DASH_DOMAIN}/api/auth/callback/google ，一個字都不要多。"
+    say "     b. 用 nano ${APP_DIR}/.env 填兩個欄位：AUTH_GOOGLE_ID（用戶端 ID）與 AUTH_GOOGLE_SECRET（用戶端密鑰），把原本的 placeholder 換掉並存檔。"
+    say "     c. 在 ${APP_DIR} 執行下面這一行讓新設定生效（改完 .env 一定要用 up -d；restart 不會讀到新值）："
+    say "        ${COMPOSE_STR} up -d"
+    say "     （不想等 Google 設定，可以先在主機上用 ${APP_DIR}/scripts/issue-key.sh test-app \"說明文字\" 發金鑰，照第 $((n + 2)) 步測試。）"
+    n=$((n + 1))
+  fi
+  say "  ${n}. 儀表板 →「應用程式」→「新增軟體」，取個名字，複製只顯示一次的虛擬金鑰（sk- 開頭）。"
+  n=$((n + 1))
+  say "  ${n}. 用那把金鑰打一次閘道，確認有回答："
   say "     curl -s https://${GW_DOMAIN}/v1/chat/completions -H \"Authorization: Bearer sk-你的虛擬金鑰\" -H \"Content-Type: application/json\" -d '{\"model\":\"gemini-flash-free\",\"messages\":[{\"role\":\"user\",\"content\":\"用一句話自我介紹\"}]}'"
-  say "  3. 回儀表板「總覽」，幾秒內會看到這一筆呼叫與花費。"
-  say "  沒有瀏覽器時，也可以在主機上用 ${APP_DIR}/scripts/issue-key.sh test-app \"說明文字\" 發金鑰。"
+  n=$((n + 1))
+  say "  ${n}. 回儀表板「總覽」，幾秒內會看到這一筆呼叫與花費。"
+  [ "$google_pending" -eq 1 ] || say "  沒有瀏覽器時，也可以在主機上用 ${APP_DIR}/scripts/issue-key.sh test-app \"說明文字\" 發金鑰。"
   say ""
   say "安裝紀錄：${LOG_FILE}（不含金鑰）"
 

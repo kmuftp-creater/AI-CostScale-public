@@ -38,11 +38,17 @@
 ### 前置條件
 
 1. 一台 Ubuntu 22.04 或 24.04 的主機，2 GB 記憶體以上，用 root 登入。
-2. 兩個網域，各建一筆 A 紀錄指到這台主機的 IP：一個給儀表板（例如 `cost.example.com`），一個給閘道（例如 `llm.example.com`）。DNS 沒生效時，腳本會停在申請憑證那一步並告訴你怎麼補，其他部分不受影響。
+2. 兩個網域，各建一筆 A 紀錄指到這台主機的 IP：一個給儀表板（例如 `cost.example.com`），一個給閘道（例如 `llm.example.com`）。DNS 沒生效時，腳本會停在申請憑證那一步並告訴你怎麼補，其他部分不受影響。網域經過 Cloudflare 代理（橘色雲朵），或主機在 NAT 後面時，解析到的 IP 本來就不是主機的對外 IP，要加 `--skip-dns-check`（見下方「選項」）。
 3. 一組 Google OAuth 用戶端（做法見第 4 節）。腳本會印出要填的重新導向 URI。還沒準備好可以先跳過，裝好之後再補。
 4. 一把 Gemini 免費金鑰，到 <https://aistudio.google.com/apikey> 建立。可以先跳過。
 
-### 兩行指令
+### 三行指令
+
+全新的 Ubuntu 沒有 git，先安裝它（已經有的話這一行可以略過）：
+
+```bash
+apt-get update && apt-get install -y git
+```
 
 把程式碼放到 `/opt/costscale`，這個路徑不能換：
 
@@ -56,7 +62,9 @@ git clone https://github.com/kmuftp-creater/AI-CostScale-public.git /opt/costsca
 bash /opt/costscale/scripts/install.sh
 ```
 
-首次安裝約 5 到 10 分鐘，大部分時間花在下載映像與建置儀表板，畫面會一直有輸出。完成時會印出每一項確認的通過與否、儀表板網址與下一步。
+首次安裝約 5 到 10 分鐘，大部分時間花在下載映像與建置儀表板。apt 與 docker 的大量輸出只寫進紀錄檔 `/var/log/costscale-install.log`，畫面只顯示每個動作的進度；任何一步失敗，會自動印出紀錄檔的最後 30 行與檔案路徑（已去掉 `.env` 裡的祕密值）。完成時會印出每一項確認的通過與否、儀表板網址與下一步。
+
+如果你自己打開紀錄檔，會看到 `debconf: delaying package configuration`、`invoke-rc.d: policy-rc.d denied execution`、`WARNING: Running pip as the 'root' user` 這類訊息，都是安裝套件時的提醒，不是錯誤。真正的失敗以腳本畫面上「安裝在第 N 步停住了」為準。
 
 ### 腳本會問什麼
 
@@ -64,12 +72,16 @@ bash /opt/costscale/scripts/install.sh
 
 | 問題 | 怎麼答 |
 |---|---|
-| 儀表板網域 | 例如 `cost.example.com`，不含 `https://` |
-| 閘道網域 | 例如 `llm.example.com`，要與儀表板不同 |
-| 可登入的 Google 帳號 | 逗號分隔，只有這些帳號登得進儀表板 |
-| Google OAuth 用戶端 ID 與密鑰 | 第 4 節拿到的兩個值；可以按 Enter 跳過 |
+| 儀表板網域 | 例如 `cost.example.com`。貼整個網址也可以，腳本會自動去掉前面的 `https://` 與後面的斜線 |
+| 閘道網域 | 例如 `llm.example.com`，要與儀表板不同；兩個填成一樣時會請你重填 |
+| 可登入的 Google 帳號 | 逗號分隔，只有這些帳號登得進儀表板。只收英數與 `.` `_` `%` `+` `-`，加上 `@` 與網域，逗號前後的空白會自動去掉 |
+| Google OAuth 用戶端 ID 與密鑰 | 第 4 節拿到的兩個值；可以按 Enter 跳過。**只有填了 ID 才會接著問密鑰**；ID 留空就整組跳過 |
 | Gemini 免費金鑰 | 可以按 Enter 跳過 |
-| Let's Encrypt 信箱 | 憑證快到期時用來通知你；繼續即代表同意 Let's Encrypt 使用條款 |
+| Let's Encrypt 信箱 | 憑證快到期時用來通知你；繼續即代表同意 Let's Encrypt 使用條款。**只有 `--tls letsencrypt`（預設）且這台主機還沒有該網域的憑證時才會問**，`--tls selfsigned` 與 `--tls skip` 不會問 |
+
+Google ID、密鑰與 Gemini 金鑰會原樣寫進 `.env`，所以不能含空白、引號（`'` 或 `"`）、`$`、反引號；含有這些字元時腳本會請你重填。
+
+答案會存進 `/opt/costscale/.env` 這個設定檔，已經填過的項目重跑時會直接沿用，不再問。
 
 資料庫密碼、閘道主金鑰、登入加密用的 `AUTH_SECRET` 等 6 個亂數，腳本自己產生，不會顯示在畫面上，也不會寫進紀錄檔。
 
@@ -79,9 +91,10 @@ HTTPS 的做法用 `--tls` 選擇：
 
 | 選項 | 做什麼 |
 |---|---|
-| `--tls letsencrypt` | 預設。先檢查兩個網域的 DNS 是否指到這台主機，再向 Let's Encrypt 申請正式憑證 |
-| `--tls selfsigned` | 產生自簽憑證，只供內網或測試，瀏覽器會顯示不安全 |
+| `--tls letsencrypt` | 預設。先檢查兩個網域的 DNS 是否指到這台主機，再向 Let's Encrypt 申請正式憑證。申請期間 nginx 的 80 埠只回應憑證驗證路徑，其他路徑一律 404，儀表板與閘道不會以明文對外；申請失敗時也維持這個狀態，修好後原樣重跑即可 |
+| `--tls selfsigned` | 產生自簽憑證，只供內網或測試，瀏覽器會顯示不安全。憑證是非 CA 憑證（`CA:FALSE`），**腳本會把它加入這台主機的系統信任庫**，讓主機上的排程腳本連得上自己的 HTTPS；因此不要用在正式環境，也不要把這張憑證與私鑰（`/etc/ssl/costscale`）帶到別台機器 |
 | `--tls skip` | 不動 nginx，HTTPS 由你自己處理 |
+| `--skip-dns-check` | 只對 `--tls letsencrypt` 有用：略過 DNS 比對。網域經過 Cloudflare 代理（橘色雲朵）或主機在 NAT 後面時使用。Let's Encrypt 仍要能從外網連到這台主機的 80 埠，申請不到憑證時仍會停下並說明 |
 
 不想被問問題（例如從自動化腳本執行），加 `--non-interactive`，答案改由環境變數 `CS_DASH_DOMAIN`、`CS_GW_DOMAIN`、`CS_ALLOWED_EMAILS`、`CS_GOOGLE_ID`、`CS_GOOGLE_SECRET`、`CS_GEMINI_FREE_KEY`、`CS_LE_EMAIL` 提供。完整說明：
 
@@ -91,11 +104,13 @@ bash /opt/costscale/scripts/install.sh --help
 
 ### 中途停住怎麼辦
 
-腳本任何一步失敗，都會印出原因、該看哪個檔，以及「重新執行同一行指令」。**修好問題後原樣再跑一次即可**：做好的步驟會自動跳過，既有的 `.env` 不會被覆蓋，已產生的亂數不會改變。完整紀錄在 `/var/log/costscale-install.log`。
+腳本任何一步失敗，都會印出原因、該看哪個檔、紀錄檔的最後 30 行，以及「重新執行同一行指令」。**修好問題後原樣再跑一次即可**：做好的步驟會自動跳過，既有的 `.env` 不會被覆蓋，已產生的亂數不會改變。完整紀錄在 `/var/log/costscale-install.log`。
+
+**唯一的例外是 `AUTH_DISABLED`**：腳本「不改 `.env` 已有的值」，只有這個欄位例外。每次執行時，只要它不是 `0`，腳本就改回 `0`，並在畫面上印出「偵測到 AUTH_DISABLED=1，已改回 0」與原因。原因是設成 `1` 代表儀表板不用登入，任何人連得到網址就能看花費與金鑰；這支腳本是裝正式環境用的，所以不留這個口子。只在本機或內網測試、確定要關掉登入時，請在腳本跑完後再手動把它改回 `1`，並執行下面的 `up -d`。
 
 ### 跳過 Google 登入設定的話
 
-腳本結尾會提醒「還不能登入」。補上的做法：
+腳本結尾會提醒「還不能登入儀表板」，「下一步」的第 1 步就是補 Google 登入設定，要先做完它才能登入儀表板。補上的做法：
 
 1. 照第 4 節建立 OAuth 用戶端。
 2. 用 `nano /opt/costscale/.env` 把 `AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET` 換成拿到的值。
@@ -111,11 +126,11 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up
 |---|---|
 | 檢查環境：root、Ubuntu 22.04 以上、程式碼在 `/opt/costscale`、記憶體 | 第 1 節 |
 | 問答 | 第 3、4 節 |
-| 安裝 Docker、git、curl、python3、nginx、certbot、cron | 第 1.1、1.2 節 |
+| 安裝 Docker、git、curl、python3、nginx、certbot、cron（畫面只顯示進度，完整輸出在紀錄檔） | 第 1.1、1.2 節 |
 | 產生 `.env`（既有的不覆蓋，只補缺的） | 第 3 節 |
 | 建立 `spool/upstream-keys` 與 `/root/vertex-sa.json` 空檔 | 第 5 節 |
 | 啟動服務並等到就緒 | 第 5 節 |
-| nginx 與 HTTPS | 第 6 節 |
+| nginx 與 HTTPS（`--tls selfsigned` 時，另外把自簽憑證加入主機的系統信任庫） | 第 6 節 |
 | 必要排程（寫在標記行 `# >>> costscale install` 與 `# <<< costscale install` 之間，重跑時取代同一區塊，不動你其他的排程） | 第 7 節 |
 | 完整確認、印出摘要與下一步 | 各節的「確認」 |
 
