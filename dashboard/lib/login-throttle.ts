@@ -52,7 +52,15 @@ function normalizeIp(raw: string): string | null {
   if (kind === 6 && !v.includes("%")) {
     try {
       // 交給 URL 正規化，同一個位址的不同寫法（::1、0:0:0:0:0:0:0:1）才會落在同一個 key
-      return new URL(`http://[${v}]/`).hostname.slice(1, -1);
+      const canon = new URL(`http://[${v}]/`).hostname.slice(1, -1);
+      // IPv4-mapped IPv6（::ffff:10.5.5.5，URL 會轉成 ::ffff:a05:505）與同一個 IPv4 位址算同一個來源（V-06）
+      const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(canon);
+      if (mapped) {
+        const hi = parseInt(mapped[1], 16);
+        const lo = parseInt(mapped[2], 16);
+        return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+      }
+      return canon;
     } catch {
       return null;
     }

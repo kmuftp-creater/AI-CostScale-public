@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeTokenEqual } from "@/lib/token-compare";
 import { insertOtelUsage } from "@/lib/db";
 import { tokenUnset } from "@/lib/secret-check";
 
@@ -70,7 +71,7 @@ function authorizeIngest(request: NextRequest): NextResponse | null {
   }
   const auth = request.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (token !== expected) {
+  if (!safeTokenEqual(token, expected)) {
     return NextResponse.json({ error: "token 不正確" }, { status: 401 });
   }
   return null;
