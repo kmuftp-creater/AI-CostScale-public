@@ -428,7 +428,7 @@ collect_answers() {
   [ "$DASH_DOMAIN" != "$GW_DOMAIN" ] || die "儀表板與閘道要用兩個不同的網域，現在兩個都是 $DASH_DOMAIN" "不需要看紀錄"
 
   if is_unset "$cur_mail"; then
-    ask ALLOWED_EMAILS CS_ALLOWED_EMAILS "可以登入儀表板的 Google 帳號，多個用逗號分隔（例如 me@gmail.com,boss@gmail.com）。只有這些帳號登得進去。" 1 0 chk_emails "要像 me@gmail.com，多個用逗號分隔"
+    ask ALLOWED_EMAILS CS_ALLOWED_EMAILS "可以登入儀表板的 Google 帳號，多個用逗號分隔（例如 you@example.com,boss@example.com）。只有這些帳號登得進去。" 1 0 chk_emails "要像 you@example.com，多個用逗號分隔"
     ALLOWED_EMAILS=$(printf '%s' "$ALLOWED_EMAILS" | tr -d '[:space:]')
   else
     ALLOWED_EMAILS="$cur_mail"
@@ -463,7 +463,7 @@ collect_answers() {
   fi
 
   if [ "$TLS_MODE" = "letsencrypt" ] && [ ! -e "/etc/letsencrypt/live/${DASH_DOMAIN}/fullchain.pem" ]; then
-    ask LE_EMAIL CS_LE_EMAIL "Let's Encrypt 憑證要用的信箱（憑證快到期、帳號有事時它會寄信通知）。繼續即代表同意 Let's Encrypt 使用條款。" 1 0 chk_email "要像 me@gmail.com"
+    ask LE_EMAIL CS_LE_EMAIL "Let's Encrypt 憑證要用的信箱（憑證快到期、帳號有事時它會寄信通知）。繼續即代表同意 Let's Encrypt 使用條款。" 1 0 chk_email "要像 you@example.com"
   fi
   say "  問答完成。接下來不用再回答，可以等它跑完（首次約 5 到 10 分鐘）。"
 }
