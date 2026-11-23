@@ -1,7 +1,7 @@
 // 上手清單狀態函式的單元層級驗證。不需要資料庫與閘道。
 // 執行（Node 22.18 以上可直接讀 .ts）：  node scripts/test-onboarding.mjs
 import assert from "node:assert/strict";
-import { evaluateOnboarding, FALLBACK_MODEL } from "../lib/onboarding-core.ts";
+import { evaluateOnboarding, summarizeProviderKeys, FALLBACK_MODEL } from "../lib/onboarding-core.ts";
 
 const ok = (value) => ({ ok: true, value });
 const bad = (error) => ({ ok: false, error });
@@ -86,6 +86,77 @@ for (const [name, c] of Object.entries(cases)) {
       assert.ok(u.note.includes("查不到"), "無法確認要有說明");
     }
     console.log(`PASS ${name}: ${states(r)}  完成度 ${r.doneCount}/${r.total}  allDone=${r.allDone}  model=${r.curl.model}`);
+  } catch (e) {
+    failed++;
+    console.log(`FAIL ${name}: ${e.message}`);
+  }
+}
+// T-01：金鑰盤點的摘要（閘道錯誤、橋接權杖不得算成供應商金鑰）。
+const dep = (modelName) => ({ modelName, deploymentId: null });
+const row = (envName, kind, tail, models) => ({ envName, kind, tail, deployments: models.map(dep) });
+const probeOf = (inv) => {
+  try {
+    return ok(summarizeProviderKeys(inv));
+  } catch (e) {
+    return bad(e.message);
+  }
+};
+const t01 = {
+  "T-01 閘道錯誤時為無法確認": () => {
+    // 閘道不通時橋接被歸成 provider，且 BRIDGE_TOKEN 尾碼是真值；不得算成已完成。
+    const inv = {
+      configError: null,
+      gatewayError: "fetch failed",
+      keys: [row("BRIDGE_TOKEN", "provider", "7d21", ["sub-claude", "sub-codex"])],
+    };
+    const r = evaluateOnboarding({ ...cases.全完成.sig, providerKeys: probeOf(inv) }, ctx);
+    assert.equal(r.steps[0].done, null);
+    assert.ok(r.steps[0].note.includes("查不到"));
+  },
+  "T-01 只有橋接權杖沒有供應商金鑰時為未完成": () => {
+    const inv = {
+      configError: null,
+      gatewayError: null,
+      keys: [
+        row("BRIDGE_TOKEN", "bridge", "7d21", ["sub-claude"]),
+        row("GEMINI_FREE_KEY_1", "provider", "lder", ["gemini-flash-free"]),
+      ],
+    };
+    const r = evaluateOnboarding({ ...cases.全完成.sig, providerKeys: probeOf(inv) }, ctx);
+    assert.equal(r.steps[0].done, false);
+  },
+  "T-01 閘道正常時橋接不計入": () => {
+    const s = summarizeProviderKeys({
+      configError: null,
+      gatewayError: null,
+      keys: [
+        row("BRIDGE_TOKEN", "bridge", "7d21", ["sub-claude"]),
+        row("GEMINI_FREE_KEY_1", "provider", "0Ows", ["gemini-flash-free"]),
+      ],
+    });
+    assert.equal(s.realCount, 1);
+    assert.equal(s.totalCount, 1);
+  },
+  "T-01 kind 被誤判為 provider 時仍靠變數名排除橋接": () => {
+    const s = summarizeProviderKeys({
+      configError: null,
+      gatewayError: null,
+      keys: [row("BRIDGE_TOKEN", "provider", "7d21", ["sub-claude"]), row("GROQ_KEY_1", "provider", "abcd", ["groq-fast"])],
+    });
+    assert.equal(s.realCount, 1);
+  },
+  "T-03 fx 空表與過期為兩種文案": () => {
+    const empty = evaluateOnboarding({ ...cases.全未完成.sig, fxAgeHours: ok(null) }, ctx).steps[3].note;
+    const stale = evaluateOnboarding({ ...cases.全未完成.sig, fxAgeHours: ok(40) }, ctx).steps[3].note;
+    assert.ok(empty.includes("還沒有任何排程寫入的紀錄"));
+    assert.ok(stale.includes("超過 26 小時"));
+    assert.ok(!/也許|可能|大概|通常/.test(empty + stale));
+  },
+};
+for (const [name, fn] of Object.entries(t01)) {
+  try {
+    fn();
+    console.log(`PASS ${name}`);
   } catch (e) {
     failed++;
     console.log(`FAIL ${name}: ${e.message}`);

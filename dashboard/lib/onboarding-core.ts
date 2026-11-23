@@ -61,6 +61,52 @@ export const FALLBACK_MODEL = "gemini-flash-free";
 export const FX_FRESH_HOURS = 26;
 /** 範本裡未填金鑰的佔位字是 "placeholder"，尾 4 碼是 "lder"。 */
 export const PLACEHOLDER_TAIL = "lder";
+/** 訂閱橋接共用的環境變數名（litellm-config.yaml 的 api_key: os.environ/BRIDGE_TOKEN）。 */
+export const BRIDGE_ENV_NAME = "BRIDGE_TOKEN";
+
+/** summarizeProviderKeys 需要的金鑰盤點欄位（getKeyInventory 回傳值的子集）。 */
+export type InventoryLike = {
+  configError: string | null;
+  gatewayError: string | null;
+  keys: { envName: string; kind: string; tail: string | null; deployments: { modelName: string; deploymentId: string | null }[] }[];
+};
+
+/**
+ * 不靠閘道回報就能辨識的橋接憑證：變數名是 BRIDGE_TOKEN，或所有部署的名稱都以 sub- 開頭。
+ * 閘道不可用時 kind 會被誤判成 provider，所以這裡不能只看 kind。
+ */
+function isBridgeRow(k: InventoryLike["keys"][number]): boolean {
+  if (k.kind === "bridge" || k.envName === BRIDGE_ENV_NAME) return true;
+  return k.deployments.length > 0 && k.deployments.every((d) => d.modelName.startsWith("sub-"));
+}
+
+/**
+ * 第 1 步的金鑰盤點摘要。閘道回報錯誤時，橋接與供應商金鑰的歸類不可信，一律丟錯，
+ * 讓第 1 步變成「無法確認」（不得當成已完成或未完成）。
+ */
+export function summarizeProviderKeys(inv: InventoryLike) {
+  if (inv.configError) throw new Error(`讀不到閘道設定：${inv.configError}`);
+  if (inv.gatewayError) throw new Error(`閘道暫時沒回應，無法分辨橋接與供應商金鑰：${inv.gatewayError}`);
+  const rows = inv.keys.filter((k) => !isBridgeRow(k));
+  // 尾碼表是主機端排程寫的。一把都對不到＝表不存在或還沒寫，不能當成「全是 placeholder」。
+  if (rows.length > 0 && rows.every((k) => k.tail === null)) {
+    throw new Error("讀不到金鑰尾碼表（主機端排程還沒寫過）");
+  }
+  const isReal = (tail: string | null) => tail !== null && tail !== "" && tail !== PLACEHOLDER_TAIL;
+  const real = rows.filter((k) => isReal(k.tail));
+  // 閘道上真的載入、而且金鑰是真的的第一個模型。排除訂閱通道與萬用部署。
+  let model: string | null = null;
+  for (const k of real) {
+    const d = k.deployments.find(
+      (x) => x.deploymentId && !x.modelName.startsWith("sub-") && !x.modelName.includes("*")
+    );
+    if (d) {
+      model = d.modelName;
+      break;
+    }
+  }
+  return { realCount: real.length, totalCount: rows.length, model };
+}
 
 export const OPTIONAL_ITEMS: OptionalItem[] = [
   {
@@ -156,7 +202,9 @@ export function evaluateOnboarding(sig: OnboardingSignals, ctx: { gatewayUrl: st
           ? UNKNOWN_NOTE
           : s4
             ? "排程最近 26 小時內有更新資料。"
-            : "超過 26 小時沒有排程寫入的紀錄。請回主機照 INSTALL.md 第 7 節設定排程，或重新執行一次安裝腳本，之後重新整理這頁。",
+            : fx.ok && fx.value === null
+              ? "還沒有任何排程寫入的紀錄。剛裝好的話，等到下一個整點排程跑過就會打勾；等過一個整點仍沒打勾，再回主機照 INSTALL.md 第 7 節設定排程，或重新執行一次安裝腳本。"
+              : "超過 26 小時沒有排程寫入的紀錄。請回主機照 INSTALL.md 第 7 節設定排程，或重新執行一次安裝腳本，之後重新整理這頁。",
       href: "/subscriptions",
       linkLabel: "前往「訂閱」看匯率",
     },

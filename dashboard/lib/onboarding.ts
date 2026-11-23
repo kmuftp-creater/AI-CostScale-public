@@ -14,7 +14,7 @@ import { getPool } from "@/lib/db";
 import { getKeyInventory } from "@/lib/keys";
 import {
   evaluateOnboarding,
-  PLACEHOLDER_TAIL,
+  summarizeProviderKeys,
   type OnboardingResult,
   type OnboardingSignals,
   type Probe,
@@ -43,27 +43,7 @@ async function probe<T>(fn: () => Promise<T>): Promise<Probe<T>> {
 }
 
 async function readProviderKeys() {
-  const inv = await getKeyInventory();
-  if (inv.configError) throw new Error(`讀不到閘道設定：${inv.configError}`);
-  const rows = inv.keys.filter((k) => k.kind === "provider");
-  // 尾碼表是主機端排程寫的。一把都對不到＝表不存在或還沒寫，不能當成「全是 placeholder」。
-  if (rows.length > 0 && rows.every((k) => k.tail === null)) {
-    throw new Error("讀不到金鑰尾碼表（主機端排程還沒寫過）");
-  }
-  const isReal = (tail: string | null) => tail !== null && tail !== "" && tail !== PLACEHOLDER_TAIL;
-  const real = rows.filter((k) => isReal(k.tail));
-  // 閘道上真的載入、而且金鑰是真的的第一個模型。排除訂閱通道與萬用部署。
-  let model: string | null = null;
-  for (const k of real) {
-    const d = k.deployments.find(
-      (x) => x.deploymentId && !x.modelName.startsWith("sub-") && !x.modelName.includes("*")
-    );
-    if (d) {
-      model = d.modelName;
-      break;
-    }
-  }
-  return { realCount: real.length, totalCount: rows.length, model };
+  return summarizeProviderKeys(await getKeyInventory());
 }
 
 async function readAppCount(): Promise<number> {

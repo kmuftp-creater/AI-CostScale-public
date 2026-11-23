@@ -486,6 +486,10 @@ ask() {
         echo "  格式不對：${fmt}。請再輸入一次。"
         continue
       fi
+      # 不回顯的輸入沒有任何畫面回饋，印字元數讓使用者知道貼上成功（不印內容）。
+      if [ "$secret" -eq 1 ] && [ -n "$ans" ]; then
+        echo "  已收到（共 ${#ans} 個字元，畫面不顯示內容）。"
+      fi
       break
     done
   fi
@@ -1266,6 +1270,9 @@ main() {
   touch "$LOG_FILE" 2>/dev/null || true
   say ""
   say "===== AI CostScale 安裝 $(date '+%Y-%m-%d %H:%M:%S')（TLS：${TLS_MODE}，非互動：${NON_INTERACTIVE}）====="
+  if [ "$SKIP_DNS_CHECK" -eq 1 ] && [ "$TLS_MODE" != "letsencrypt" ]; then
+    say "  提示：這個模式（--tls ${TLS_MODE}）不檢查 DNS，--skip-dns-check 不會有作用。"
+  fi
   check_environment
   collect_answers
   install_tools

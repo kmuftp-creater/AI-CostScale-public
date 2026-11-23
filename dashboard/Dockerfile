@@ -12,7 +12,15 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 # 建置時 next/font/google 要連 fonts.googleapis.com 下載字型，暫時連不上會讓建置失敗。
 # 最多試 3 次，成功就立刻結束；建置內容不變，只是不必人工重跑。
-RUN for i in 1 2 3; do npm run build && exit 0; echo "建置失敗（第 $i 次），5 秒後重試" >&2; sleep 5; done; exit 1
+# 第 1 次失敗後等 15 秒、第 2 次失敗後等 45 秒，給暫時性的網路問題恢復的時間。
+RUN for i in 1 2 3; do \
+      npm run build && exit 0; \
+      if [ "$i" -lt 3 ]; then \
+        if [ "$i" -eq 1 ]; then w=15; else w=45; fi; \
+        echo "下載 Google 字型失敗是暫時現象，正在重試（第 $i 次失敗，$w 秒後進行第 $((i+1)) 次）" >&2; \
+        sleep "$w"; \
+      fi; \
+    done; exit 1
 
 FROM node:24-alpine AS runner
 WORKDIR /app
