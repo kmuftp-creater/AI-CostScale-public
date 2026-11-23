@@ -112,7 +112,7 @@ docker compose up -d --build
 
 1. 執行 `docker compose ps`。要看到四個服務都在執行：`db`、`litellm`、`dashboard`、`scheduler`，其中 `db` 與 `litellm` 的狀態要顯示 `(healthy)`。閘道第一次啟動約需 30 秒到 1 分鐘，剛啟動時顯示 `(health: starting)` 是正常的。
 2. 瀏覽器開 `http://localhost:3000`，會先導到登入頁；登入後看到總覽，最上方有「上手清單」。
-3. 清單的第 1 步（放入 AI 供應商金鑰）在步驟 2 貼了金鑰的話已經打勾。第 4 步（確認排程有在跑）會在啟動後 1 到 3 分鐘內自動打勾：排程容器啟動後約 10 秒抓第一次匯率。看排程容器的紀錄：
+3. 清單的第 1 步（放入 AI 供應商金鑰）在步驟 2 貼了金鑰的話已經打勾。第 4 步（確認排程有在跑）會在啟動後 1 到 3 分鐘內自動打勾：排程容器啟動後先安裝套件（約 30 秒），再抓第一次匯率。看排程容器的紀錄：
 
    ```
    docker compose logs scheduler
@@ -133,7 +133,7 @@ docker compose up -d --build
    curl -s http://localhost:4000/v1/chat/completions -H "Authorization: Bearer sk-你的虛擬金鑰" -H "Content-Type: application/json" -d '{"model":"gemini-flash-free","messages":[{"role":"user","content":"用一句話自我介紹"}]}'
    ```
 
-   Gemini 免費額度的上游偶爾回 `503`（`high demand`），過幾秒再打一次即可。另外 `gemini-flash-free` 是 5 把金鑰輪替，只放了一把時，其他 4 個欄位還是佔位字，輪到它們會回 `401`，閘道會自動重試 2 次；仍然失敗就再打一次。閘道會把回 401 的欄位暫停一小段時間，之後比較穩。
+   Gemini 免費額度的上游偶爾回 `503`（`high demand`），過幾秒再打一次即可。另外 `gemini-flash-free` 是 5 把金鑰輪替，只放了一把時，其他 4 個欄位還是佔位字，輪到它們會回 `401`，閘道會自動重試 2 次；仍然失敗就再打一次。
 
    在 Docker 容器裡跑的專案，網址用 `http://host.docker.internal:4000`（Docker Desktop；Linux 要替那個容器加 `--add-host=host.docker.internal:host-gateway`）。
 
@@ -248,7 +248,7 @@ docker compose down -v --rmi local
 
 再把專案資料夾刪掉，`.env` 也會一起消失。只刪資料夾、沒有執行上面這行的話，Docker 裡的資料還在，之後重裝會接上舊資料，但新產生的 `.env` 資料庫密碼對不上，閘道與儀表板會連不上資料庫（見常見問題）。
 
-電腦重新開機之後：Docker Desktop 啟動時會自動把這四個容器帶起來（容器設定了 `restart: unless-stopped`）。要讓 Docker Desktop 隨登入自動啟動，到它的設定裡開啟 Start Docker Desktop when you sign in to your computer。
+電腦重新開機之後：這四個容器設定了 `restart: unless-stopped`，Docker 啟動時會把沒有手動停止過的容器帶起來（這一點沒有實測整機重新開機，只實測了 `docker compose down` 再 `up -d`）。要讓 Docker Desktop 隨登入自動啟動，到它的設定裡開啟 Start Docker Desktop when you sign in to your computer。
 
 ### 限制
 
@@ -267,7 +267,7 @@ docker compose down -v --rmi local
 
 | 現象 | 原因 | 怎麼辦 |
 |---|---|---|
-| 執行任何 `docker` 指令都報連不上 Docker：`error during connect`（Windows、Mac）或 `Cannot connect to the Docker daemon`（Linux） | Docker Desktop 沒開，或還在啟動 | 打開 Docker Desktop，等到顯示引擎執行中，再重新執行同一行指令 |
+| 執行任何 `docker` 指令都報連不上 Docker。Windows 實測的訊息開頭是 `failed to connect to the docker API at npipe:...; check if the path is correct and if the daemon is running`；Mac、Linux 沒有實測，訊息文字不同（例如 `Cannot connect to the Docker daemon`），意思相同 | Docker Desktop 沒開，或還在啟動 | 打開 Docker Desktop，等到顯示引擎執行中，再重新執行同一行指令 |
 | 啟動時報 `Error response from daemon: failed to set up container networking: ... Bind for 127.0.0.1:4000 failed: port is already allocated`（實測：4000 被另一個 Docker 容器佔用時的原文；被 Docker 以外的程式佔用時，結尾的原因文字不同，但一樣有 `Bind for 127.0.0.1:埠號 failed`） | 訊息裡那個埠（這裡是 4000；儀表板是 3000、資料庫是 5442）已經被這台電腦上的另一個程式佔用。這時其他服務照常起來，只有那一個服務停在 `Created`（沒有啟動） | 執行設定工具，選 `4) 更改埠號`，把被佔用的那個改成沒人用的（例如閘道改 14000），再 `docker compose up -d`，那個服務就會起來。非互動做法：`CS_ACTION=ports` 加 `CS_GATEWAY_PORT=14000`。設定工具會一併更新 `.env` 裡的 `AUTH_URL` 與 `GATEWAY_PUBLIC_URL` |
 | 啟動時報 `failed to create network costscale_default: Error response from daemon: invalid pool request: Pool overlaps with other one on this address space` | 另一個 Docker 網路（例如先前裝過的 AI CostScale，即使它的容器已經停止）佔用了 `10.87.213.0/24` | 用文字編輯器打開 `.env`，加兩行：`COSTSCALE_SUBNET=10.87.214.0/24` 與 `COSTSCALE_GATEWAY=10.87.214.1`（網段換成沒被用的），再 `docker compose up -d`。要先看有哪些網段已被用：`docker network ls`，再對每個網路執行 `docker network inspect 網路名稱` |
 | 建置時出現 `font/google` 之類的錯誤 | 建置儀表板時要連 `fonts.googleapis.com` 下載字型，網路暫時不通 | 建置步驟已自動重試 3 次；仍失敗就等網路恢復，重新執行同一行 `docker compose up -d --build`，不會從頭來過 |
