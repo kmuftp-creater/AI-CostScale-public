@@ -2477,3 +2477,17 @@ table.model-catalog td.mc-bad { color: var(--crit); white-space: nowrap; }
   .onboard-panel { padding: var(--space-sm); }
   .onboard-step { padding: var(--space-xs); }
 }
+
+/* 本機安裝模式：金鑰管理頁「新增上游金鑰」的說明（取代表單） */
+.local-key-notice {
+  font-size: var(--text-sm);
+  line-height: 1.8;
+  color: var(--ink);
+}
+.local-key-notice p {
+  margin: 0 0 0.5rem;
+}
+.local-key-notice ol {
+  margin: 0;
+  padding-left: 1.4rem;
+}

@@ -12,6 +12,9 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const script = path.resolve(here, "../../scripts/set-admin-password.sh");
 
+// 這份測試驗的是「信任代理標頭」時的行為（雲端主機模式），所以先開 TRUST_PROXY；不信任的行為在檔案最後另外測。
+process.env.TRUST_PROXY = "1";
+
 const { getAdminConfig, parseHash, verifyAdminLogin, inputWithinLimits, ADMIN_USER_PATTERN } = await import("../lib/admin-password.ts");
 const throttle = await import("../lib/login-throttle.ts");
 
@@ -225,5 +228,34 @@ assert.equal(inputWithinLimits("a", ""), false);
 assert.equal(inputWithinLimits("a", 5), false);
 assert.equal(inputWithinLimits(undefined, "x"), false);
 ok("帳號要英數開頭；帳號 64、密碼 1024 字元的上限檢查");
+
+// 9. TRUST_PROXY：不信任代理標頭時（預設、本機安裝模式），偽造的 X-Forwarded-For 不能換來源
+{
+  const spoof = (ip) => H({ "x-forwarded-for": ip, "x-real-ip": ip });
+  for (const v of [undefined, "", "0", "true", "yes", "2"]) {
+    const env = v === undefined ? {} : { TRUST_PROXY: v };
+    assert.equal(throttle.clientIp(spoof("203.0.113.9"), env), "unknown", "TRUST_PROXY=" + JSON.stringify(v) + " 時不得讀標頭");
+  }
+  assert.equal(throttle.clientIp(spoof("203.0.113.9"), { TRUST_PROXY: "1" }), "203.0.113.9");
+  assert.equal(throttle.clientIp(spoof("203.0.113.9"), { TRUST_PROXY: " 1 " }), "203.0.113.9", "前後空白忽略");
+  // 不信任時，每次換一個偽造來源仍落在同一個 key，5 次失敗後鎖定
+  throttle.resetThrottle();
+  const T3 = 2_000_000_000_000;
+  const env0 = {};
+  for (let i = 0; i < 5; i++) {
+    const ip = throttle.clientIp(spoof("198.51.100." + (10 + i)), env0);
+    assert.equal(throttle.reserveAttempt(ip, T3 + i), 0);
+  }
+  const ipNext = throttle.clientIp(spoof("198.51.100.200"), env0);
+  assert.ok(throttle.reserveAttempt(ipNext, T3 + 10) > 0, "換偽造來源不能繞過鎖定");
+  // 信任時（雲端主機）：不同來源各自計數，行為與改動前相同
+  throttle.resetThrottle();
+  const env1 = { TRUST_PROXY: "1" };
+  for (let i = 0; i < 5; i++) assert.equal(throttle.reserveAttempt(throttle.clientIp(spoof("198.51.100.1"), env1), T3 + i), 0);
+  assert.ok(throttle.reserveAttempt(throttle.clientIp(spoof("198.51.100.1"), env1), T3 + 10) > 0, "同一來源第 6 次被鎖");
+  assert.equal(throttle.reserveAttempt(throttle.clientIp(spoof("198.51.100.2"), env1), T3 + 11), 0, "信任代理時其他來源不受影響");
+  ok("TRUST_PROXY 不是 1 時不讀標頭、偽造來源不能繞過鎖定；是 1 時與原行為相同");
+}
+
 
 console.log(`\n全部通過（${pass} 組）`);

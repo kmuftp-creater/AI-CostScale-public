@@ -12,6 +12,7 @@
  */
 import { getPool } from "@/lib/db";
 import { getKeyInventory } from "@/lib/keys";
+import { isLocalMode } from "@/lib/mode";
 import {
   evaluateOnboarding,
   summarizeProviderKeys,
@@ -95,5 +96,5 @@ export async function getOnboarding(): Promise<OnboardingResult> {
   for (const [name, p] of Object.entries(signals)) {
     if (!p.ok) console.warn(`[onboarding] ${name} 查詢失敗：${p.error}`);
   }
-  return evaluateOnboarding(signals, { gatewayUrl });
+  return evaluateOnboarding(signals, { gatewayUrl, local: isLocalMode() });
 }

@@ -1,5 +1,7 @@
 # 專案名稱固定為 costscale。scripts/ 的排程腳本用到 costscale_default 網路與
 # costscale-litellm-1 容器名，資料夾叫什麼都不影響。
+# 本機安裝模式（INSTALL.md「在自己電腦上安裝」）也用這個名字；電腦上若已有另一個叫 costscale 的
+# compose 專案（例如先前裝過又沒移除），兩個會互相蓋掉，處理方式見該節的「常見問題」。
 name: costscale
 
 # 每個服務的容器 log 大小上限：單檔 10 MB、最多 5 份（每個服務最多佔約 50 MB）。
@@ -23,7 +25,8 @@ services:
       - dbdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
     ports:
-      - "127.0.0.1:5442:5432"
+      # 埠可在 .env 用 DB_PORT 調整（本機安裝模式，預設值不變）。雲端主機的覆寫檔會整組取代這一行。
+      - "127.0.0.1:${DB_PORT:-5442}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U costscale -d costscale"]
       interval: 5s
@@ -51,7 +54,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "127.0.0.1:4000:4000"
+      # 埠可在 .env 用 GATEWAY_PORT 調整。只綁 127.0.0.1，不要改成對外。
+      - "127.0.0.1:${GATEWAY_PORT:-4000}:4000"
     # 帶入整份 .env，新增供應商金鑰時不必再改本檔（2026-08-19）
     env_file:
       - .env
@@ -83,7 +87,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3000:3000"
+      # 埠可在 .env 用 DASH_PORT 調整。只綁 127.0.0.1，不要改成對外。
+      - "127.0.0.1:${DASH_PORT:-3000}:3000"
     environment:
       DATABASE_URL: postgresql://costscale:${DB_PASSWORD}@db:5432/costscale
       LITELLM_BASE_URL: http://litellm:4000
@@ -106,6 +111,14 @@ services:
       AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS:-}
       AUTH_DISABLED: ${AUTH_DISABLED:-0}
       AUTH_TRUST_HOST: "true"
+      # 儀表板網址。雲端主機的覆寫檔會用 .env 的 AUTH_URL 取代這一行；沒設時（開發、本機模式的舊 .env）
+      # 退回 http://localhost:<DASH_PORT>。
+      AUTH_URL: ${AUTH_URL:-http://localhost:${DASH_PORT:-3000}}
+      # 安裝模式。local＝裝在自己電腦上：金鑰管理頁改顯示本機做法、上手清單的文字改成本機版本。空值＝雲端主機。
+      COSTSCALE_MODE: ${COSTSCALE_MODE:-}
+      # 是否信任 X-Forwarded-For／X-Real-IP 當登入鎖定的來源 IP。預設 0（不信任，所有來源算同一個）：
+      # 沒有 nginx 覆寫這兩個標頭時，用戶端可以任意填。雲端主機的覆寫檔設為 1（nginx 會把它設成真正的來源）。
+      TRUST_PROXY: ${TRUST_PROXY:-0}
       # 預算告警：cron 用 token 呼叫 /api/budgets/check，寄信走下面的 SMTP 設定
       ALERT_CRON_TOKEN: ${ALERT_CRON_TOKEN:-}
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
@@ -140,6 +153,32 @@ services:
       - "host.docker.internal:host-gateway"
     profiles: ["full"]
 
+  # 本機安裝模式專用的排程容器（profile "local"，雲端主機不會啟動它）。
+  # 取代主機上的 cron，只做不需要操作 Docker 的兩支：匯率與訂閱入帳（每小時）、預算檢查（每小時）。
+  # **不掛 docker socket。** 套用上游金鑰佇列與閘道看門狗要操作 Docker，本機模式不提供。
+  # 啟動時要 pip 安裝 psycopg（跟 scripts/run-fx-fetch.sh 一樣），需要連得上外網。
+  # 進入點用 python（不是 shell 腳本），所以 Windows 的 CRLF 換行不會弄壞它。
+  scheduler:
+    image: python:3.12-slim
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://costscale:${DB_PASSWORD}@db:5432/costscale
+      ALERT_CRON_TOKEN: ${ALERT_CRON_TOKEN:-}
+      DASHBOARD_URL: http://dashboard:3000
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_ROOT_USER_ACTION: ignore
+    volumes:
+      - ./scripts:/scripts:ro
+    command:
+      - sh
+      - -c
+      - "until pip install --quiet --no-cache-dir 'psycopg[binary]'; do echo '安裝 psycopg 失敗（網路不通？），15 秒後重試'; sleep 15; done; exec python -u /scripts/local-scheduler.py"
+    profiles: ["local"]
+
 volumes:
   dbdata:
 
@@ -152,12 +191,14 @@ volumes:
 # 寫死的橋接位址就會對不上。10.x 不在 Docker 的自動分配範圍內，不會被別的專案先拿走。
 #
 # 若主機本身的網路（例如雲端的私有網路）剛好也用 10.87.213.x，`up` 會報 Pool overlaps。
-# 那時把下面兩行，以及 litellm-config.yaml、bridge/supervisor.ps1、
+# 本機安裝模式（沒有訂閱橋接）的處理：在 .env 加兩行 COSTSCALE_SUBNET=10.87.214.0/24 與
+# COSTSCALE_GATEWAY=10.87.214.1（換成沒被用的網段）。雲端主機要用橋接的話，
+# 把下面兩行，以及 litellm-config.yaml、bridge/supervisor.ps1、
 # scripts/run-sub-usage-fetch.sh、scripts/fetch-sub-usage.py、dashboard/lib/routing.ts
 # 裡的 10.87.213.1 一起換成別的網段。
 networks:
   default:
     ipam:
       config:
-        - subnet: 10.87.213.0/24
-          gateway: 10.87.213.1
+        - subnet: ${COSTSCALE_SUBNET:-10.87.213.0/24}
+          gateway: ${COSTSCALE_GATEWAY:-10.87.213.1}

@@ -152,6 +152,22 @@ const t01 = {
     assert.ok(stale.includes("超過 26 小時"));
     assert.ok(!/也許|可能|大概|通常/.test(empty + stale));
   },
+  "本機模式的步驟 1、4 說明改成本機做法，不叫人去主機設 cron": () => {
+    const lctx = { ...ctx, local: true };
+    const r = evaluateOnboarding(cases.全未完成.sig, lctx);
+    const t = r.steps.map((x) => x.desc + x.note).join(" ");
+    assert.ok(r.steps[0].note.includes("docker-compose.setup.yml"), "步驟 1 要教本機加金鑰的做法");
+    assert.ok(!r.steps[0].note.includes("驗證並排入套用"), "步驟 1 不得叫人用網頁新增上游金鑰");
+    assert.ok(r.steps[3].desc.includes("scheduler"), "步驟 4 要說是排程容器");
+    assert.ok(r.steps[3].note.includes("docker compose logs scheduler"));
+    assert.ok(!/INSTALL.md 第 7 節|crontab|主機上的排程/.test(t), "本機模式不得提到主機排程");
+    assert.ok(!/也許|可能|大概|通常/.test(t));
+    const stale = evaluateOnboarding({ ...cases.全未完成.sig, fxAgeHours: ok(40) }, lctx).steps[3].note;
+    assert.ok(stale.includes("Docker Desktop") && stale.includes("超過 26 小時"));
+    // 沒帶 local 時維持原樣
+    const v = evaluateOnboarding(cases.全未完成.sig, ctx);
+    assert.ok(v.steps[0].note.includes("驗證並排入套用") && v.steps[3].note.includes("INSTALL.md 第 7 節"));
+  },
 };
 for (const [name, fn] of Object.entries(t01)) {
   try {

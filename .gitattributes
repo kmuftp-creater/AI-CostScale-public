@@ -5,6 +5,17 @@
 *.yml       text eol=lf
 .env.example text eol=lf
 scripts/*   text eol=lf
+# 會掛進容器、或在容器裡被讀取與執行的檔案（本機安裝模式，Windows 上的 git 預設會換成 CRLF）：
+# python 腳本、資料庫初始化 SQL、Dockerfile、儀表板與閘道在執行時讀的設定與內容檔。
+*.py        text eol=lf
+*.sql       text eol=lf
+Dockerfile  text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.mjs       text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.css       text eol=lf
 # PowerShell 5.1 讀無 BOM 的 UTF-8 .ps1 會當成 CP950，含中文的腳本會解析失敗。
 # 這類檔案一律 CRLF＋BOM，寫入時務必用 utf-8-sig。
 *.ps1       text eol=crlf

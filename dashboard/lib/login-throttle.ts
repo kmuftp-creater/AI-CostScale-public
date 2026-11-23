@@ -12,7 +12,10 @@ import { isIP } from "node:net";
  *      也不會因此把管理員整個鎖在外面）。
  *
  * 來源 IP 取 X-Forwarded-For 最左邊一個，沒有就退回 X-Real-IP。這兩個標頭只有在反向代理
- * 會「覆寫」它們時才可信：INSTALL.md 的 nginx 設定把 X-Forwarded-For 設成 $remote_addr，
+ * 會「覆寫」它們時才可信，所以只有環境變數 TRUST_PROXY=1 時才讀（docker-compose.vps.yml 設為 1）。
+ * 沒設或不是 1（預設，例如本機安裝模式：前面沒有 nginx，用戶端可以任意填這兩個標頭）時一律不讀，
+ * 所有來源算同一個 key（"unknown"）：本機只有自己在用，可以接受；代價是輸錯 5 次整個登入都鎖 15 分鐘。
+ * 讀標頭時：INSTALL.md 的 nginx 設定把 X-Forwarded-For 設成 $remote_addr，
  * 用戶端自己帶的值會被丟掉。直接連 127.0.0.1:3300 繞過 nginx 的人可以偽造，但那只有主機上的人做得到。
  */
 
@@ -57,8 +60,9 @@ function normalizeIp(raw: string): string | null {
   return null;
 }
 
-/** 從請求標頭取來源 IP。只收合法的 IP，其餘一律歸成固定的 "unknown"（同一桶）。 */
-export function clientIp(headers: Headers): string {
+/** 從請求標頭取來源 IP（TRUST_PROXY=1 才讀標頭）。只收合法的 IP，其餘一律歸成固定的 "unknown"（同一桶）。 */
+export function clientIp(headers: Headers, env: Record<string, string | undefined> = process.env): string {
+  if ((env.TRUST_PROXY ?? "").trim() !== "1") return UNKNOWN_IP;
   const cand = [headers.get("x-forwarded-for")?.split(",")[0], headers.get("x-real-ip")];
   for (const c of cand) {
     const v = normalizeIp(c ?? "");

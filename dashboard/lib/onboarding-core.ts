@@ -138,7 +138,12 @@ export function buildCurl(gatewayUrl: string, model: string): string {
   );
 }
 
-export function evaluateOnboarding(sig: OnboardingSignals, ctx: { gatewayUrl: string }): OnboardingResult {
+export function evaluateOnboarding(
+  sig: OnboardingSignals,
+  /** local：本機安裝模式，步驟 1、4 的說明改成本機做法（沒有主機排程）。 */
+  ctx: { gatewayUrl: string; local?: boolean },
+): OnboardingResult {
+  const local = ctx.local === true;
   const pk = sig.providerKeys;
   const ac = sig.appCount;
   const sc = sig.successCalls;
@@ -160,7 +165,9 @@ export function evaluateOnboarding(sig: OnboardingSignals, ctx: { gatewayUrl: st
           ? UNKNOWN_NOTE
           : s1
             ? `已放入 ${pk.ok ? pk.value.realCount : 0} 把真的金鑰。`
-            : "目前每個金鑰欄位都還是範本的佔位字 placeholder。到「金鑰管理」頁的「新增上游金鑰」貼上金鑰，按「驗證並排入套用」，約一分鐘後生效。",
+            : local
+              ? "目前每個金鑰欄位都還是範本的佔位字 placeholder。本機安裝模式不能在網頁上加金鑰：在專案資料夾執行 docker compose -f docker-compose.setup.yml run --rm setup，選「新增 AI 金鑰」，再執行 docker compose up -d。"
+              : "目前每個金鑰欄位都還是範本的佔位字 placeholder。到「金鑰管理」頁的「新增上游金鑰」貼上金鑰，按「驗證並排入套用」，約一分鐘後生效。",
       href: "/keys",
       linkLabel: "前往「金鑰管理」",
     },
@@ -196,15 +203,21 @@ export function evaluateOnboarding(sig: OnboardingSignals, ctx: { gatewayUrl: st
       id: "schedule",
       done: s4,
       title: "確認排程有在跑",
-      desc: "主機上的排程每天會更新匯率、檢查預算。排程沒跑的話，台幣金額會越來越舊，預算超標也不會有人通知。",
+      desc: local
+        ? "本機安裝附的排程容器（scheduler）每小時會更新匯率、檢查預算。排程沒跑的話，台幣金額會越來越舊，預算超標也不會有人通知。"
+        : "主機上的排程每天會更新匯率、檢查預算。排程沒跑的話，台幣金額會越來越舊，預算超標也不會有人通知。",
       note:
         s4 === null
           ? UNKNOWN_NOTE
           : s4
             ? "排程最近 26 小時內有更新資料。"
-            : fx.ok && fx.value === null
-              ? "還沒有任何排程寫入的紀錄。剛裝好的話，等到下一個整點排程跑過就會打勾；等過一個整點仍沒打勾，再回主機照 INSTALL.md 第 7 節設定排程，或重新執行一次安裝腳本。"
-              : "超過 26 小時沒有排程寫入的紀錄。請回主機照 INSTALL.md 第 7 節設定排程，或重新執行一次安裝腳本，之後重新整理這頁。",
+            : local
+              ? fx.ok && fx.value === null
+                ? "還沒有任何排程寫入的紀錄。剛啟動的話，排程容器在啟動後數分鐘內會抓第一次匯率，稍後重新整理就會打勾；超過 10 分鐘仍沒打勾，執行 docker compose ps 確認 scheduler 在跑，再用 docker compose logs scheduler 看原因。"
+                : "超過 26 小時沒有排程寫入的紀錄。本機安裝的排程容器只在電腦開機、Docker 開著時執行：先確認 Docker Desktop 有開，執行 docker compose ps 看 scheduler 是否在跑，再用 docker compose logs scheduler 看原因。"
+              : fx.ok && fx.value === null
+                ? "還沒有任何排程寫入的紀錄。剛裝好的話，等到下一個整點排程跑過就會打勾；等過一個整點仍沒打勾，再回主機照 INSTALL.md 第 7 節設定排程，或重新執行一次安裝腳本。"
+                : "超過 26 小時沒有排程寫入的紀錄。請回主機照 INSTALL.md 第 7 節設定排程，或重新執行一次安裝腳本，之後重新整理這頁。",
       href: "/subscriptions",
       linkLabel: "前往「訂閱」看匯率",
     },

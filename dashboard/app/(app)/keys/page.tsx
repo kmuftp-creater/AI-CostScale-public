@@ -8,6 +8,7 @@ import RetargetModelClient, { type Candidate } from "./RetargetModelClient";
 import PriceModelClient from "./PriceModelClient";
 import ModelCatalogPanel from "@/components/ModelCatalogPanel";
 import { formatTokens, formatTaipei, sinceNow } from "@/lib/format";
+import { isLocalMode, LOCAL_KEY_NOTICE, LOCAL_KEY_STEPS } from "@/lib/mode";
 import { Fragment } from "react";
 import {
   readUpstreamModels,
@@ -401,7 +402,7 @@ function KeyTable({ rows, upstream }: { rows: UpstreamKeyRow[]; upstream: Upstre
                   envName={k.envName}
                   tail={k.tail}
                   modelNames={models}
-                  blockedReason={blocked}
+                  blockedReason={isLocalMode() ? LOCAL_KEY_NOTICE : blocked}
                 />
               </td>
             </tr>
@@ -532,60 +533,72 @@ export default async function KeysPage() {
             <span className="panel-title">新增上游金鑰</span>
             <span className="microlabel">加進既有模型組當輪替的一把</span>
           </div>
-          <AddUpstreamKeyClient
-            usedEnvNames={providerKeys.map((k) => k.envName)}
-            /* 開新模型組時要挑模型，所以把各供應商的型錄一起送過去（2026-09-21）。
-               只送 id 與幾個標籤，不送整份 meta——前端只需要「挑得出來、看得出風險」。 */
-            catalogs={Object.fromEntries(
-              ["gemini", "groq", "openrouter", "openai", "anthropic"].map((prov) => [
-                prov,
-                (upstreamModels.providers[prov]?.models ?? []).slice(0, 500).map((id) => {
-                  const m = upstreamModels.providers[prov]?.meta?.[id];
-                  return {
-                    id,
-                    group: m?.group ?? "其他",
-                    stage: m?.stage ?? "",
-                    expires: m?.expires ?? "",
-                  };
-                }),
-              ])
-            )}
-            options={(() => {
-              // 每個模型組帶著「目前掛在它底下的環境變數名」一起送給前端，
-              // 前端才算得出下一個該叫什麼（2026-09-07：原本要使用者自己想，
-              // User 的回饋是「Gemini 不用填環境變數吧？」——他說得對，
-              // 這種東西系統自己推得出來就不該問人）。
-              const byGroup = new Map<
-                string,
-                {
-                  modelName: string;
-                  backendModel: string;
-                  provider: string;
-                  pricing: string;
-                  envNames: string[];
-                }
-              >();
-              for (const k of providerKeys) {
-                for (const d of k.deployments) {
-                  const cur = byGroup.get(d.modelName);
-                  if (cur) {
-                    if (!cur.envNames.includes(k.envName)) cur.envNames.push(k.envName);
-                  } else {
-                    byGroup.set(d.modelName, {
-                      modelName: d.modelName,
-                      backendModel: d.backendModel,
-                      provider: k.provider,
-                      pricing: k.pricing as string,
-                      envNames: [k.envName],
-                    });
+          {isLocalMode() ? (
+            <div className="local-key-notice">
+              <p>{LOCAL_KEY_NOTICE}</p>
+              <p>本機安裝模式要這樣加金鑰：</p>
+              <ol>
+                {LOCAL_KEY_STEPS.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ol>
+            </div>
+          ) : (
+            <AddUpstreamKeyClient
+              usedEnvNames={providerKeys.map((k) => k.envName)}
+              /* 開新模型組時要挑模型，所以把各供應商的型錄一起送過去（2026-09-21）。
+                 只送 id 與幾個標籤，不送整份 meta——前端只需要「挑得出來、看得出風險」。 */
+              catalogs={Object.fromEntries(
+                ["gemini", "groq", "openrouter", "openai", "anthropic"].map((prov) => [
+                  prov,
+                  (upstreamModels.providers[prov]?.models ?? []).slice(0, 500).map((id) => {
+                    const m = upstreamModels.providers[prov]?.meta?.[id];
+                    return {
+                      id,
+                      group: m?.group ?? "其他",
+                      stage: m?.stage ?? "",
+                      expires: m?.expires ?? "",
+                    };
+                  }),
+                ])
+              )}
+              options={(() => {
+                // 每個模型組帶著「目前掛在它底下的環境變數名」一起送給前端，
+                // 前端才算得出下一個該叫什麼（2026-09-07：原本要使用者自己想，
+                // User 的回饋是「Gemini 不用填環境變數吧？」——他說得對，
+                // 這種東西系統自己推得出來就不該問人）。
+                const byGroup = new Map<
+                  string,
+                  {
+                    modelName: string;
+                    backendModel: string;
+                    provider: string;
+                    pricing: string;
+                    envNames: string[];
+                  }
+                >();
+                for (const k of providerKeys) {
+                  for (const d of k.deployments) {
+                    const cur = byGroup.get(d.modelName);
+                    if (cur) {
+                      if (!cur.envNames.includes(k.envName)) cur.envNames.push(k.envName);
+                    } else {
+                      byGroup.set(d.modelName, {
+                        modelName: d.modelName,
+                        backendModel: d.backendModel,
+                        provider: k.provider,
+                        pricing: k.pricing as string,
+                        envNames: [k.envName],
+                      });
+                    }
                   }
                 }
-              }
-              return Array.from(byGroup.values()).sort((a, b) =>
-                a.modelName.localeCompare(b.modelName)
-              );
-            })()}
-          />
+                return Array.from(byGroup.values()).sort((a, b) =>
+                  a.modelName.localeCompare(b.modelName)
+                );
+              })()}
+            />
+          )}
         </div>
       </section>
 

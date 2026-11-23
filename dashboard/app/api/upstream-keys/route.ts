@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, writeFile, rename, chmod } from "node:fs/prom
 import path from "node:path";
 import { requireSession } from "@/lib/auth-guard";
 import { kindOfDeployment } from "@/lib/model-kind";
+import { isLocalMode, LOCAL_KEY_NOTICE, LOCAL_KEY_STEPS } from "@/lib/mode";
 
 export const dynamic = "force-dynamic";
 
@@ -207,6 +208,15 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const guard = await requireSession();
   if (guard) return guard;
+
+  // 本機安裝模式沒有主機端的 apply-upstream-key.py（它要操作 Docker，本機模式不提供），
+  // 排進佇列的請求永遠不會有人處理。直接拒絕，不寫任何檔案，並告訴使用者正式做法。
+  if (isLocalMode()) {
+    return NextResponse.json(
+      { error: `${LOCAL_KEY_NOTICE}要加金鑰請這樣做：${LOCAL_KEY_STEPS.join(" ")}`, localMode: true },
+      { status: 409 }
+    );
+  }
 
   let body: Record<string, unknown>;
   try {

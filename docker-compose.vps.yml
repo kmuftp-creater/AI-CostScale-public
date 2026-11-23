@@ -25,3 +25,5 @@ services:
       - "127.0.0.1:3300:3000"
     environment:
       AUTH_URL: ${AUTH_URL}
+      # nginx 會把 X-Forwarded-For 設成真正的來源 IP（INSTALL.md 第 6 節），登入鎖定才能依來源分開計數
+      TRUST_PROXY: "1"

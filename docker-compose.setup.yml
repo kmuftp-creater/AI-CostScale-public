@@ -1,0 +1,38 @@
+# 本機安裝模式的設定工具。只需要 Docker，不需要 bash、python 或任何其他工具。
+#
+#   docker compose -f docker-compose.setup.yml run --rm setup
+#
+# 它在一次性的 python:3.12-slim 容器裡執行 scripts/local-setup.py：問管理員帳號與密碼、一把 AI 金鑰（可跳過），
+# 在專案資料夾產生 .env（亂數祕密自動產生，密碼只存雜湊）。已有 .env 時不覆蓋，改給選單
+# （補欄位、新增 AI 金鑰、改密碼、改埠）。完整說明見 INSTALL.md「在自己電腦上安裝」。
+#
+# 設計：
+#   - 進入點是 python 檔，不是 shell 腳本：Windows 的 git 會把文字檔換成 CRLF，CRLF 的 .sh 在 Linux 容器裡會壞，
+#     python 兩種換行都收。
+#   - network_mode: none：設定工具不需要網路，也不會留下 Docker 網路。
+#   - 專案資料夾掛成 /work，只有它會被改動（.env 與 spool/upstream-keys/_tails.json）。
+#   - 專案名稱獨立（costscale-setup），不會動到你的 costscale 服務。
+name: costscale-setup
+
+services:
+  setup:
+    image: python:3.12-slim
+    working_dir: /work
+    volumes:
+      - .:/work
+    # 非互動用的環境變數（沒設的不會傳進去）。用 -e 或先在終端機設好都可以，欄位說明見 scripts/local-setup.py 開頭。
+    environment:
+      - CS_ACTION
+      - CS_ADMIN_USER
+      - CS_ADMIN_PASSWORD
+      - CS_GEMINI_FREE_KEY
+      - CS_GROQ_KEY
+      - CS_OPENROUTER_KEY
+      - CS_GEMINI_PAID_KEY
+      - CS_DASH_PORT
+      - CS_GATEWAY_PORT
+      - CS_DB_PORT
+      - PYTHONDONTWRITEBYTECODE=1
+    network_mode: none
+    stdin_open: true
+    entrypoint: ["python", "-I", "-u", "/work/scripts/local-setup.py"]
