@@ -2314,3 +2314,93 @@ table.model-catalog td.mc-calls { color: var(--muted); white-space: nowrap; }
 table.model-catalog td.mc-bad { color: var(--crit); white-space: nowrap; }
 /* 勾選清單裡，名稱旁邊的一行說明 */
 .model-note { color: var(--muted); font-size: 0.78rem; }
+
+/* ── 上手清單（總覽頁最上方）──────────
+   只用既有的色彩 token：完成＝--c-free、未完成＝--warn、無法確認＝--muted。
+   不新增任何色碼，不用漸層與光暈。 */
+.onboard-panel { border-color: var(--rule); }
+.onboard-steps { list-style: none; display: grid; gap: var(--space-sm); }
+.onboard-step {
+  display: flex;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-btn);
+  background: var(--paper);
+  min-width: 0;
+}
+.onboard-step.is-todo { border-color: var(--warn); }
+.onboard-step.is-done { opacity: 0.85; }
+.onboard-icon { flex: none; margin-top: 2px; }
+.onboard-icon.is-done { color: var(--c-free); }
+.onboard-icon.is-todo { color: var(--warn); }
+.onboard-icon.is-unknown { color: var(--muted); }
+.onboard-body { min-width: 0; flex: 1; }
+.onboard-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-weight: 700;
+}
+.onboard-num {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.onboard-state {
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--ink-2);
+}
+.onboard-state.is-done { border-color: var(--c-free); }
+.onboard-state.is-todo { border-color: var(--warn); }
+.onboard-desc { margin-top: 0.3rem; color: var(--ink); font-size: var(--text-sm); }
+.onboard-note { margin-top: 0.3rem; color: var(--ink-2); font-size: var(--text-sm); display: block; }
+.onboard-go { margin-top: var(--space-xs); }
+.onboard-curl { margin-top: var(--space-xs); }
+.onboard-curl pre {
+  background: var(--paper-3);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-btn);
+  padding: var(--space-xs);
+  margin-bottom: 0.5rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+.onboard-optional { margin-top: var(--space-md); padding-top: var(--space-sm); border-top: 1px solid var(--rule-soft); }
+.onboard-optional-head { font-weight: 700; font-size: var(--text-sm); color: var(--ink-2); margin-bottom: 0.5rem; }
+.onboard-optional ul { list-style: none; display: grid; gap: 0.6rem; }
+.onboard-optional li { display: flex; flex-wrap: wrap; gap: var(--space-xs); align-items: center; justify-content: space-between; }
+.onboard-optional li > div { flex: 1 1 18rem; min-width: 0; }
+.onboard-linkbtn {
+  background: none;
+  border: none;
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.onboard-linkbtn:hover { color: var(--ink); }
+.onboard-folded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+.onboard-folded .btn-ghost { padding: 0.15rem 0.6rem; }
+@media (max-width: 600px) {
+  .onboard-panel { padding: var(--space-sm); }
+  .onboard-step { padding: var(--space-xs); }
+}

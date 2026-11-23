@@ -24,6 +24,7 @@ import {
 import { resolveRange } from "@/lib/range";
 import { listQuotaPoolsLive } from "@/lib/keys";
 import TrendChart from "@/components/TrendChart";
+import OnboardingCard from "@/components/OnboardingCard";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ const SUB_PROVIDER_LABEL: Record<string, string> = {
 export default async function OverviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
+  searchParams: Promise<{ range?: string; from?: string; to?: string; onboarding?: string }>;
 }) {
   const params = await searchParams;
   const range = resolveRange(params);
@@ -189,6 +190,8 @@ export default async function OverviewPage({
 
   return (
     <>
+      {/* 上手清單：四步都完成就不顯示；網址帶 ?onboarding=1 一律顯示 */}
+      <OnboardingCard force={params.onboarding === "1"} />
       <div className="ledger-strip">
         <div className="ledger-cell">
           {/* 微標一定要跟著區間走。寫死「本月」的話，選了上月或自訂之後

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import Link from "next/link";
 import { marked } from "marked";
 
 export const metadata = { title: "說明 · AI CostScale" };
@@ -57,6 +58,9 @@ export default async function ManualPage() {
           <span className="panel-title">使用說明</span>
           <span className="microlabel">前三節是該做什麼、怎麼做；其餘是各頁與數字怎麼讀</span>
         </div>
+        <p className="ledger-note">
+          剛裝好、不確定下一步？<Link href="/?onboarding=1">回頭看上手清單</Link>，它會依實際狀態顯示每一步做了沒。
+        </p>
         <div className="prose" dangerouslySetInnerHTML={{ __html: html }} />
         <div className="panel-foot">
           這一頁的內容來自 <code>dashboard/content/manual.md</code>，是唯一來源。
