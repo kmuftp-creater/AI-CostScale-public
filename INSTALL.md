@@ -1,6 +1,6 @@
 # AI CostScale 安裝說明
 
-照順序做完第 1 到第 8 節，閘道與儀表板就能用了。第 9 節以後都是選用：訂閱橋接、用量收集器、專案看板，要用再裝。
+想省事的話，直接用下面「快速安裝」那一節：一支腳本做完第 1 到 7 節。要手動安裝或腳本停住了要對照排錯，才照順序做第 1 到第 8 節。第 9 節以後都是選用：訂閱橋接、用量收集器、專案看板，要用再裝。
 
 每一節最後都有一個「確認」步驟。**確認沒過就不要往下做**，後面的步驟都建立在前面的結果上。
 
@@ -26,6 +26,102 @@
 - **閘道**替你保管所有供應商的真金鑰。專案只拿到閘道發的虛擬金鑰，每一筆呼叫都記帳。
 - **儀表板**看花費、發金鑰、設每月上限。只有白名單裡的 Google 帳號能登入。
 - **訂閱橋接**是選用的。沒裝的話 `sub-*` 這幾個模型打不通，其他一切照常。
+
+---
+
+## 快速安裝（建議）
+
+第 1 到 7 節的工作，已經寫成一支互動式腳本 `scripts/install.sh`。它會裝工具、問你幾個問題、產生 `.env`、啟動服務、設定 nginx 與 HTTPS、安裝必要排程。多數人用這一節就夠了，做完直接接第 8 節。
+
+原本的第 1 到 7 節保留，用途是手動安裝，以及腳本停住時對照排錯。
+
+### 前置條件
+
+1. 一台 Ubuntu 22.04 或 24.04 的主機，2 GB 記憶體以上，用 root 登入。
+2. 兩個網域，各建一筆 A 紀錄指到這台主機的 IP：一個給儀表板（例如 `cost.example.com`），一個給閘道（例如 `llm.example.com`）。DNS 沒生效時，腳本會停在申請憑證那一步並告訴你怎麼補，其他部分不受影響。
+3. 一組 Google OAuth 用戶端（做法見第 4 節）。腳本會印出要填的重新導向 URI。還沒準備好可以先跳過，裝好之後再補。
+4. 一把 Gemini 免費金鑰，到 <https://aistudio.google.com/apikey> 建立。可以先跳過。
+
+### 兩行指令
+
+把程式碼放到 `/opt/costscale`，這個路徑不能換：
+
+```bash
+git clone https://github.com/kmuftp-creater/AI-CostScale-public.git /opt/costscale
+```
+
+執行安裝腳本：
+
+```bash
+bash /opt/costscale/scripts/install.sh
+```
+
+首次安裝約 5 到 10 分鐘，大部分時間花在下載映像與建置儀表板，畫面會一直有輸出。完成時會印出每一項確認的通過與否、儀表板網址與下一步。
+
+### 腳本會問什麼
+
+每一題都有一句說明，答案會寫進 `/opt/costscale/.env`。
+
+| 問題 | 怎麼答 |
+|---|---|
+| 儀表板網域 | 例如 `cost.example.com`，不含 `https://` |
+| 閘道網域 | 例如 `llm.example.com`，要與儀表板不同 |
+| 可登入的 Google 帳號 | 逗號分隔，只有這些帳號登得進儀表板 |
+| Google OAuth 用戶端 ID 與密鑰 | 第 4 節拿到的兩個值；可以按 Enter 跳過 |
+| Gemini 免費金鑰 | 可以按 Enter 跳過 |
+| Let's Encrypt 信箱 | 憑證快到期時用來通知你；繼續即代表同意 Let's Encrypt 使用條款 |
+
+資料庫密碼、閘道主金鑰、登入加密用的 `AUTH_SECRET` 等 6 個亂數，腳本自己產生，不會顯示在畫面上，也不會寫進紀錄檔。
+
+### 選項
+
+HTTPS 的做法用 `--tls` 選擇：
+
+| 選項 | 做什麼 |
+|---|---|
+| `--tls letsencrypt` | 預設。先檢查兩個網域的 DNS 是否指到這台主機，再向 Let's Encrypt 申請正式憑證 |
+| `--tls selfsigned` | 產生自簽憑證，只供內網或測試，瀏覽器會顯示不安全 |
+| `--tls skip` | 不動 nginx，HTTPS 由你自己處理 |
+
+不想被問問題（例如從自動化腳本執行），加 `--non-interactive`，答案改由環境變數 `CS_DASH_DOMAIN`、`CS_GW_DOMAIN`、`CS_ALLOWED_EMAILS`、`CS_GOOGLE_ID`、`CS_GOOGLE_SECRET`、`CS_GEMINI_FREE_KEY`、`CS_LE_EMAIL` 提供。完整說明：
+
+```bash
+bash /opt/costscale/scripts/install.sh --help
+```
+
+### 中途停住怎麼辦
+
+腳本任何一步失敗，都會印出原因、該看哪個檔，以及「重新執行同一行指令」。**修好問題後原樣再跑一次即可**：做好的步驟會自動跳過，既有的 `.env` 不會被覆蓋，已產生的亂數不會改變。完整紀錄在 `/var/log/costscale-install.log`。
+
+### 跳過 Google 登入設定的話
+
+腳本結尾會提醒「還不能登入」。補上的做法：
+
+1. 照第 4 節建立 OAuth 用戶端。
+2. 用 `nano /opt/costscale/.env` 把 `AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET` 換成拿到的值。
+3. 在 `/opt/costscale` 執行下面這行重建儀表板（`restart` 不會讀到新的 `.env`）：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d
+```
+
+### 腳本做了哪些事
+
+| 腳本步驟 | 對應手動章節 |
+|---|---|
+| 檢查環境：root、Ubuntu 22.04 以上、程式碼在 `/opt/costscale`、記憶體 | 第 1 節 |
+| 問答 | 第 3、4 節 |
+| 安裝 Docker、git、curl、python3、nginx、certbot、cron | 第 1.1、1.2 節 |
+| 產生 `.env`（既有的不覆蓋，只補缺的） | 第 3 節 |
+| 建立 `spool/upstream-keys` 與 `/root/vertex-sa.json` 空檔 | 第 5 節 |
+| 啟動服務並等到就緒 | 第 5 節 |
+| nginx 與 HTTPS | 第 6 節 |
+| 必要排程（寫在標記行 `# >>> costscale install` 與 `# <<< costscale install` 之間，重跑時取代同一區塊，不動你其他的排程） | 第 7 節 |
+| 完整確認、印出摘要與下一步 | 各節的「確認」 |
+
+腳本不會刪資料庫 volume、不會執行 `docker compose down -v`、不會碰防火牆與 SSH 設定。
+
+做完快速安裝，直接跳到第 8 節發第一把金鑰。
 
 ---
 
