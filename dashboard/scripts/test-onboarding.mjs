@@ -76,6 +76,16 @@ for (const [name, c] of Object.entries(cases)) {
     assert.equal(r.curl.model, c.expect.model);
     assert.ok(r.curl.command.includes("https://gw.example.com/v1/chat/completions"), "curl 網址");
     assert.ok(r.curl.command.includes("sk-你的虛擬金鑰"), "curl 金鑰位置");
+    // bash 版的內容必須是純 ASCII（Git Bash 轉送含中文的指令列會壞掉），金鑰佔位的中文除外
+    assert.ok(!/[^\x00-\x7f]/.test(r.curl.command.replace("sk-你的虛擬金鑰", "")), "bash 版內容不得含非 ASCII 字元");
+    // PowerShell 版：Invoke-RestMethod、UTF-8 位元組、讀回 UTF-8、不使用 curl 別名與 -H
+    const ps = r.curl.powershell;
+    assert.ok(ps.includes("Invoke-RestMethod") && ps.includes("https://gw.example.com/v1/chat/completions"), "PowerShell 版網址與指令");
+    assert.ok(ps.includes("[System.Text.Encoding]::UTF8.GetBytes") && ps.includes("charset=utf-8"), "PowerShell 版用 UTF-8 位元組送出");
+    assert.ok(ps.includes("-Encoding UTF8") && ps.includes(".choices[0].message.content"), "PowerShell 版用 UTF-8 讀回並印出回答文字");
+    assert.ok(ps.includes("-Headers @{ Authorization = \"Bearer sk-你的虛擬金鑰\" }"), "PowerShell 版金鑰位置");
+    assert.ok(!/(^|\s)curl(\s|$)/m.test(ps) && !ps.includes(" -H "), "PowerShell 版不得出現 curl 別名與 -H");
+    assert.ok(ps.includes(`"model":"${r.curl.model}"`), "PowerShell 版模型名");
     for (const s of r.steps) {
       assert.ok([...s.title].length <= 16, `標題超過 16 字：${s.title}`);
       assert.ok(s.href.startsWith("/"), "每步都有連結");

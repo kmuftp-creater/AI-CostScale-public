@@ -39,7 +39,15 @@ function StateIcon({ done }: { done: boolean | null }) {
 
 const STATE_LABEL = (d: boolean | null) => (d === true ? "已完成" : d === null ? "無法確認" : "未完成");
 
-function StepRow({ step, index, curl }: { step: OnboardingStep; index: number; curl: string | null }) {
+function StepRow({
+  step,
+  index,
+  curl,
+}: {
+  step: OnboardingStep;
+  index: number;
+  curl: { bash: string; powershell: string } | null;
+}) {
   const state = step.done === true ? "done" : step.done === null ? "unknown" : "todo";
   return (
     <li className={`onboard-step is-${state}`} data-step={step.id} data-state={state}>
@@ -53,12 +61,26 @@ function StepRow({ step, index, curl }: { step: OnboardingStep; index: number; c
         <p className="onboard-desc">{step.desc}</p>
         <p className="onboard-note">{step.note}</p>
         {curl ? (
-          <div className="onboard-curl">
-            <pre>
-              <code>{curl}</code>
-            </pre>
-            <OnboardingCopy text={curl} />
-          </div>
+          <>
+            <div className="microlabel" style={{ display: "block", margin: "0.6rem 0 0.25rem" }}>
+              Windows PowerShell
+            </div>
+            <div className="onboard-curl" data-shell="powershell">
+              <pre>
+                <code>{curl.powershell}</code>
+              </pre>
+              <OnboardingCopy text={curl.powershell} />
+            </div>
+            <div className="microlabel" style={{ display: "block", margin: "0.6rem 0 0.25rem" }}>
+              macOS／Linux（Windows 的 Git Bash 也可以）
+            </div>
+            <div className="onboard-curl" data-shell="bash">
+              <pre>
+                <code>{curl.bash}</code>
+              </pre>
+              <OnboardingCopy text={curl.bash} />
+            </div>
+          </>
         ) : null}
         {step.done === true ? null : (
           <Link className="btn-primary onboard-go" href={step.href}>
@@ -109,7 +131,11 @@ export default async function OnboardingCard({ force }: { force: boolean }) {
               key={s.id}
               step={s}
               index={i}
-              curl={s.id === "first-call" && callStep?.done !== true ? data.curl.command : null}
+              curl={
+                s.id === "first-call" && callStep?.done !== true
+                  ? { bash: data.curl.command, powershell: data.curl.powershell }
+                  : null
+              }
             />
           ))}
         </ol>

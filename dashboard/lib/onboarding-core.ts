@@ -50,7 +50,8 @@ export type OnboardingResult = {
   allDone: boolean;
   /** 還沒確認完成的步驟數（未完成 ＋ 無法確認）。 */
   remaining: number;
-  curl: { url: string; model: string; command: string };
+  /** command 是 macOS／Linux（bash）版，powershell 是 Windows PowerShell 版。 */
+  curl: { url: string; model: string; command: string; powershell: string };
   optional: OptionalItem[];
 };
 
@@ -128,14 +129,41 @@ export const OPTIONAL_ITEMS: OptionalItem[] = [
 const UNKNOWN_NOTE =
   "目前查不到這一步的狀態（資料庫或閘道暫時沒回應），這不代表沒做。稍後重新整理再看一次。";
 
+/**
+ * macOS／Linux（含 Windows 的 Git Bash）用的 curl 指令。
+ *
+ * 範例內容刻意用純英文（ASCII）：Git Bash 把含中文的指令列轉給 curl.exe 時編碼會壞掉，
+ * 閘道收到的 JSON 缺字，回 400「Missing required parameter: messages」（2026-11-23 驗收實測）。
+ * 英文內容加上「用繁體中文回答」，回答仍然是中文。
+ */
 export function buildCurl(gatewayUrl: string, model: string): string {
   const url = gatewayUrl.replace(/\/+$/, "");
   return (
     `curl -s ${url}/v1/chat/completions ` +
     `-H "Authorization: Bearer sk-你的虛擬金鑰" ` +
     `-H "Content-Type: application/json" ` +
-    `-d '{"model":"${model}","messages":[{"role":"user","content":"用一句話自我介紹"}]}'`
+    `-d '{"model":"${model}","messages":[{"role":"user","content":"Introduce yourself in one sentence, in Traditional Chinese."}]}'`
   );
+}
+
+/**
+ * Windows PowerShell（5.1 與 7 都可以）用的指令，可以直接整段貼上，會直接印出回答文字。
+ *
+ * 為什麼不是照搬 curl：PowerShell 裡的 curl 是 Invoke-WebRequest 的別名，-H 這類參數會報
+ * Cannot bind parameter 'Headers'。
+ * 為什麼要用 UTF-8 位元組送出：PowerShell 5.1 預設用系統編碼送字串，中文會變成亂碼。
+ * 為什麼回答要先存成暫存檔再用 UTF-8 讀：閘道的回應沒有標示字元集，PowerShell 5.1 會用 Latin-1 解碼，
+ * 中文回答會變成亂碼（2026-11-23 實測）；寫進檔案是原始位元組，再指定 UTF-8 讀回來才正確。
+ */
+export function buildPowerShell(gatewayUrl: string, model: string): string {
+  const url = gatewayUrl.replace(/\/+$/, "");
+  return [
+    `$body = '{"model":"${model}","messages":[{"role":"user","content":"用一句話自我介紹"}]}'`,
+    `$f = New-TemporaryFile`,
+    `Invoke-RestMethod -Uri "${url}/v1/chat/completions" -Method Post -Headers @{ Authorization = "Bearer sk-你的虛擬金鑰" } -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -OutFile $f`,
+    `(Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json).choices[0].message.content`,
+    `Remove-Item $f`,
+  ].join("\n");
 }
 
 export function evaluateOnboarding(
@@ -195,7 +223,7 @@ export function evaluateOnboarding(
           ? UNKNOWN_NOTE
           : s3
             ? `閘道已記到 ${sc.ok ? sc.value : 0} 筆成功的請求。`
-            : "在任何一台電腦貼上下面這段指令（把 sk-你的虛擬金鑰 換成剛才複製的金鑰）。有回答就成功，回到這頁重新整理就會打勾。",
+            : "依你的電腦選下面 macOS／Linux 或 Windows PowerShell 那一段貼上（把 sk-你的虛擬金鑰 換成剛才複製的金鑰）。有回答就成功，回到這頁重新整理就會打勾。",
       href: "/requests",
       linkLabel: "看「請求紀錄」",
     },
@@ -232,7 +260,7 @@ export function evaluateOnboarding(
     total: steps.length,
     allDone: doneCount === steps.length,
     remaining: steps.length - doneCount,
-    curl: { url, model, command: buildCurl(url, model) },
+    curl: { url, model, command: buildCurl(url, model), powershell: buildPowerShell(url, model) },
     optional: OPTIONAL_ITEMS,
   };
 }
