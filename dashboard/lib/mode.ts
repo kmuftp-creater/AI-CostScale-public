@@ -16,6 +16,15 @@ export function isLocalMode(env: Record<string, string | undefined> = process.en
 export const LOCAL_KEY_NOTICE =
   "本機安裝模式不能在這個畫面新增、移除或修改上游金鑰：這些操作要排進佇列，由雲端主機上的排程套用，本機模式沒有那支排程，送出後會永遠停在排隊中。";
 
+/** 本機模式移除一把金鑰的正式做法。 */
+export const LOCAL_REMOVE_KEY_STEPS = [
+  "打開終端機（Windows 用 PowerShell），切到放這個專案的資料夾。",
+  "執行：docker compose -f docker-compose.setup.yml run --rm setup",
+  "在選單選「移除 AI 金鑰」，選要移除的那一把。",
+  "執行：docker compose up -d",
+  "要讓那把金鑰真正作廢，還要到供應商的後台（例如 Google AI Studio）把它停用或刪除。",
+];
+
 /** 本機模式加金鑰的正式做法，分成步驟給畫面逐行顯示。 */
 export const LOCAL_KEY_STEPS = [
   "打開終端機（Windows 用 PowerShell），切到放這個專案的資料夾。",

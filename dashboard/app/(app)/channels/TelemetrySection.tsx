@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getOtelSummary, getCliUsageSummary } from "@/lib/db";
+import { isLocalMode } from "@/lib/mode";
 import { formatTokens, formatTokensZh, formatTaipei } from "@/lib/format";
 
 
@@ -279,7 +280,7 @@ setx OTEL_EXPORTER_OTLP_HEADERS "Authorization=Bearer <遙測 token>"`}</pre>
           <div className="panel-foot">
             最後那行是必要的。接收端需要 token 才收，否則回 401——
             這支端點會寫進資料庫，不能對外開放。
-            token 在 VPS 的 <code>/opt/costscale/.env</code> 的{" "}
+            token 在{isLocalMode() ? "專案資料夾" : " VPS "}的 <code>{isLocalMode() ? ".env" : "/opt/costscale/.env"}</code> 的{" "}
             <code>OTEL_INGEST_TOKEN</code>。
             設完要重開終端機，<code>setx</code> 不影響已經開著的行程。
           </div>

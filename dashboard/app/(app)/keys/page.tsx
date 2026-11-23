@@ -8,7 +8,7 @@ import RetargetModelClient, { type Candidate } from "./RetargetModelClient";
 import PriceModelClient from "./PriceModelClient";
 import ModelCatalogPanel from "@/components/ModelCatalogPanel";
 import { formatTokens, formatTaipei, sinceNow } from "@/lib/format";
-import { isLocalMode, LOCAL_KEY_NOTICE, LOCAL_KEY_STEPS } from "@/lib/mode";
+import { isLocalMode, LOCAL_KEY_NOTICE, LOCAL_KEY_STEPS, LOCAL_REMOVE_KEY_STEPS } from "@/lib/mode";
 import { Fragment } from "react";
 import {
   readUpstreamModels,
@@ -169,8 +169,14 @@ function ModelsRow({ row, data }: { row: UpstreamKeyRow; data: UpstreamModels })
           </summary>
           {!cat ? (
             <p className="k-note">
-              還沒有這把金鑰的清單。主機端排程每 6 小時抓一次
-              （<code>scripts/fetch-upstream-models.py</code>）。
+              {isLocalMode() ? (
+                <>還沒有這把金鑰的清單。本機安裝模式沒有抓取各供應商模型清單的排程，這一欄會維持空白，不影響呼叫。</>
+              ) : (
+                <>
+                  還沒有這把金鑰的清單。主機端排程每 6 小時抓一次
+                  （<code>scripts/fetch-upstream-models.py</code>）。
+                </>
+              )}
             </p>
           ) : (
             <>
@@ -440,7 +446,11 @@ export default async function KeysPage() {
             <span className="microlabel">上游金鑰</span>
             <div className="hero-figure">{providerKeys.length}</div>
             <div className="ledger-note">
-              全部存在 VPS 的 <code>/opt/costscale/.env</code>，權限 600，不進版本控制
+              {isLocalMode() ? (
+                <>全部存在專案資料夾裡的 <code>.env</code>，不進版本控制</>
+              ) : (
+                <>全部存在 VPS 的 <code>/opt/costscale/.env</code>，權限 600，不進版本控制</>
+              )}
             </div>
           </div>
           <div className="ledger-cell">
@@ -542,6 +552,12 @@ export default async function KeysPage() {
                   <li key={t}>{t}</li>
                 ))}
               </ol>
+              <p>要移除一把金鑰：</p>
+              <ol>
+                {LOCAL_REMOVE_KEY_STEPS.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ol>
             </div>
           ) : (
             <AddUpstreamKeyClient
@@ -623,11 +639,20 @@ export default async function KeysPage() {
             <KeyTable rows={providerKeys} upstream={upstreamModels} />
           )}
           <div className="panel-foot">
-            右欄的「移除」把那把金鑰從輪替裡拿掉、並把 <code>.env</code> 那一行改成註解
-            （<strong>值留著</strong>，按錯救得回來）。要讓金鑰真正作廢，還是得去供應商後台停用它——
-            那件事這裡做不到，也不該做。
+            {isLocalMode() ? (
+              <>
+                本機安裝模式不能在這個畫面移除金鑰，要重新執行設定工具、選「移除 AI 金鑰」，做法在上方「新增上游金鑰」那一塊。
+                要讓金鑰真正作廢，還是得去供應商後台停用它。
+              </>
+            ) : (
+              <>
+                右欄的「移除」把那把金鑰從輪替裡拿掉、並把 <code>.env</code> 那一行改成註解
+                （<strong>值留著</strong>，按錯救得回來）。要讓金鑰真正作廢，還是得去供應商後台停用它——
+                那件事這裡做不到，也不該做。
+              </>
+            )}
             <br />
-            左欄是 <code>.env</code> 的<strong>變數名</strong>，不是金鑰值——金鑰本體一個位元組都不會離開 VPS。
+            左欄是 <code>.env</code> 的<strong>變數名</strong>，不是金鑰值——金鑰本體一個位元組都不會離開{isLocalMode() ? "這台電腦" : " VPS"}。
             要輪換某一把時，改的就是這個名字對應的那一行。
             <br />
             同一個模型名底下的多把金鑰是 <code>simple-shuffle</code>

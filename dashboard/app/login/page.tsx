@@ -4,6 +4,7 @@ import { AuthError } from "next-auth";
 import { signIn } from "@/auth";
 import { loginMethods } from "@/lib/auth-config";
 import { secretProblemText } from "@/lib/secret-check";
+import { isLocalMode } from "@/lib/mode";
 
 export const metadata = {
   title: "登入 · AI CostScale",
@@ -148,12 +149,23 @@ export default async function LoginPage({
               .env 裡的 <code>AUTH_SECRET</code> {secretProblemText(secretProblem)}。這個欄位是儀表板簽發登入憑證用的密鑰，
               沒設好的時候，系統會拒絕所有登入，避免有人用公開的預設值偽造登入。
             </p>
-            <p>在安裝這個系統的主機上，依序做三件事。第 1 件，產生一組新的亂數，把印出來的那一行複製起來：</p>
-            <code>openssl rand -hex 32</code>
-            <p>第 2 件，用下面這一行打開 .env，找到 AUTH_SECRET= 那一行，把等號後面換成剛才複製的亂數（前後不要留空白），存檔離開：</p>
-            <code>nano /opt/costscale/.env</code>
-            <p>第 3 件，讓新設定生效（只執行 restart 不會讀到新的 .env），做完後重新整理這個頁面：</p>
-            <code>cd /opt/costscale &amp;&amp; docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d dashboard</code>
+            {isLocalMode() ? (
+              <>
+                <p>在放這個專案的資料夾（Windows 用 PowerShell），依序做兩件事。第 1 件，執行設定工具，選 1（檢查並補齊），它會把太短或範本值的 AUTH_SECRET 換成新的亂數：</p>
+                <code>docker compose -f docker-compose.setup.yml run --rm setup</code>
+                <p>第 2 件，讓新設定生效（只執行 restart 不會讀到新的 .env），做完後重新整理這個頁面：</p>
+                <code>docker compose up -d dashboard</code>
+              </>
+            ) : (
+              <>
+                <p>在安裝這個系統的主機上，依序做三件事。第 1 件，產生一組新的亂數，把印出來的那一行複製起來：</p>
+                <code>openssl rand -hex 32</code>
+                <p>第 2 件，用下面這一行打開 .env，找到 AUTH_SECRET= 那一行，把等號後面換成剛才複製的亂數（前後不要留空白），存檔離開：</p>
+                <code>nano /opt/costscale/.env</code>
+                <p>第 3 件，讓新設定生效（只執行 restart 不會讀到新的 .env），做完後重新整理這個頁面：</p>
+                <code>cd /opt/costscale &amp;&amp; docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d dashboard</code>
+              </>
+            )}
           </div>
         ) : null}
 
@@ -161,10 +173,20 @@ export default async function LoginPage({
           <div className="login-empty" role="alert">
             <strong>還沒有設定任何登入方式</strong>
             <p>目前沒有人能登入這個儀表板，這是刻意的，系統不會在沒有設定時放行任何人。</p>
-            <p>在安裝這個系統的主機上執行下面這一行，依畫面提示設定管理員帳號與密碼：</p>
-            <code>bash /opt/costscale/scripts/set-admin-password.sh</code>
-            <p>腳本最後會印出一行 docker compose 指令（只重建儀表板），照著執行讓設定生效，再重新整理這個頁面。</p>
-            <p>想改用 Google 登入的話，做法見 INSTALL.md 第 4 節。</p>
+            {isLocalMode() ? (
+              <>
+                <p>在放這個專案的資料夾（Windows 用 PowerShell）執行下面這一行，選「更改管理員帳號或密碼」，依畫面提示設定：</p>
+                <code>docker compose -f docker-compose.setup.yml run --rm setup</code>
+                <p>設定完成後執行 docker compose up -d dashboard 讓設定生效，再重新整理這個頁面。</p>
+              </>
+            ) : (
+              <>
+                <p>在安裝這個系統的主機上執行下面這一行，依畫面提示設定管理員帳號與密碼：</p>
+                <code>bash /opt/costscale/scripts/set-admin-password.sh</code>
+                <p>腳本最後會印出一行 docker compose 指令（只重建儀表板），照著執行讓設定生效，再重新整理這個頁面。</p>
+                <p>想改用 Google 登入的話，做法見 INSTALL.md 第 4 節。</p>
+              </>
+            )}
           </div>
         ) : null}
 

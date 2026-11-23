@@ -25,6 +25,7 @@ import { resolveRange } from "@/lib/range";
 import { listQuotaPoolsLive } from "@/lib/keys";
 import TrendChart from "@/components/TrendChart";
 import OnboardingCard from "@/components/OnboardingCard";
+import { isLocalMode } from "@/lib/mode";
 
 export const dynamic = "force-dynamic";
 
@@ -667,8 +668,14 @@ export default async function OverviewPage({
           ) : (
             <div className="empty-state">
               <span className="microlabel">Empty</span>
-              尚無訂閱額度資料。需家用主機的橋接運作中，且 VPS 已排程
-              <code>run-sub-usage-fetch.sh</code>。
+              {isLocalMode() ? (
+                <>尚無訂閱額度資料。訂閱額度要靠家用主機的橋接服務回報，本機安裝模式沒有包含這一塊，這一格會維持空白，不影響其他功能。</>
+              ) : (
+                <>
+                  尚無訂閱額度資料。需家用主機的橋接運作中，且 VPS 已排程
+                  <code>run-sub-usage-fetch.sh</code>。
+                </>
+              )}
             </div>
           )}
           <div className="panel-foot">
