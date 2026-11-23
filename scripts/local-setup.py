@@ -267,20 +267,26 @@ def tail_names(config_text):
 def dashboard_can_read(path):
     """以儀表板容器的身分（uid 1001、gid 65533）實際開一次檔案，確認它讀得到。無法切換身分時回 False。"""
     try:
-        old_uid, old_gid = os.geteuid(), os.getegid()
-        os.setegid(DASHBOARD_GID)
-        os.seteuid(DASHBOARD_UID)
+        old_uid, old_gid, old_groups = os.geteuid(), os.getegid(), os.getgroups()
     except (AttributeError, OSError):
         return False
     try:
+        # 附加群組也要清掉：root 的群組 0 留著的話，會被誤判成「讀得到」。
+        os.setgroups([])
+        os.setegid(DASHBOARD_GID)
+        os.seteuid(DASHBOARD_UID)
         with open(path, "rb") as f:
             f.read(1)
         return True
-    except OSError:
+    except (AttributeError, OSError):
         return False
     finally:
-        os.seteuid(old_uid)
-        os.setegid(old_gid)
+        # 還原順序：先拿回 root 的 euid，才有權限改回群組。
+        for restore in (lambda: os.seteuid(old_uid), lambda: os.setegid(old_gid), lambda: os.setgroups(old_groups)):
+            try:
+                restore()
+            except (AttributeError, OSError):
+                pass
 
 
 def tighten_tails(path):

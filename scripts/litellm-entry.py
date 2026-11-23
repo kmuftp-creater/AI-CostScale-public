@@ -18,7 +18,8 @@
   2. 只有「同一個 model_name 底下至少還有一個真金鑰的部署」時才拿掉佔位部署。
      一把真金鑰都沒有的模型（例如還沒填 OpenRouter 金鑰）維持原狀，行為與以前相同。
   3. 填滿 5 把時沒有任何部署被拿掉，直接用原檔啟動，行為與以前完全一樣。
-  4. 之後補上第 2 把金鑰：在 .env 填好後重建閘道容器（docker compose up -d），啟動時重新判斷，
+  4. 之後補上第 2 把金鑰：在 .env 填好後照 INSTALL.md 的指令重建閘道容器（本機安裝是 docker compose up -d；
+     雲端主機一定要疊上 docker-compose.vps.yml，少了它埠會跑掉），啟動時重新判斷，
      第 2 個部署就會加進來。
   5. 任何一步失敗（讀不到檔、沒有 yaml 模組、寫不出暫存檔）都退回用原檔啟動，並在 log 說明，
      絕不因為這支腳本而讓閘道起不來。
@@ -108,7 +109,7 @@ def build_config(src, dst, environ):
         for name, env in dropped:
             summary.setdefault(name, []).append(env)
         for name, envs in summary.items():
-            log("%s：%s 還是佔位值，這 %d 個部署不載入（其餘有真金鑰的部署照常輪替）。補上金鑰後執行 docker compose up -d 重建閘道即可加入。"
+            log("%s：%s 還是佔位值，這 %d 個部署不載入（其餘有真金鑰的部署照常輪替）。補上金鑰後照 INSTALL.md 的指令重建閘道即可加入（本機安裝：docker compose up -d；雲端主機要疊上 docker-compose.vps.yml，不要只打這一句）。"
                 % (name, "、".join(envs), len(envs)))
         return dst
     except Exception as e:  # noqa: BLE001 - 任何失敗都要退回原檔，不能讓閘道起不來
