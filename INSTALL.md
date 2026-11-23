@@ -95,8 +95,10 @@ docker compose version
 ### 1.2 安裝其他工具
 
 ```bash
-sudo apt install -y git curl python3 nginx certbot python3-certbot-nginx
+sudo apt install -y git curl python3 nginx certbot python3-certbot-nginx cron
 ```
+
+`cron` 是第 7 節排程要用的。多數雲端主機已內建，這裡一起裝，已經有的話不會重複安裝。
 
 逐項確認，每一行都要印出版本號，沒有 `command not found`：
 
@@ -129,6 +131,12 @@ certbot --version
 ```
 
 要看到 `certbot` 加版本號，例如 `certbot 2.9.0`。
+
+```bash
+command -v crontab
+```
+
+要印出一個路徑，例如 `/usr/bin/crontab`。
 
 ---
 
@@ -696,7 +704,7 @@ cd /opt/costscale && bash scripts/run-fx-fetch.sh
 
 | 現象 | 原因 | 怎麼辦 |
 |---|---|---|
-| 儀表板登入後回到登入頁 | 你的帳號不在 `AUTH_ALLOWED_EMAILS` | 加進去後重啟 dashboard |
+| 儀表板登入後回到登入頁 | 你的帳號不在 `AUTH_ALLOWED_EMAILS` | 加進 `.env` 後，照下方「改完 `.env` 怎麼生效」重建儀表板 |
 | Google 登入顯示 `redirect_uri_mismatch` | OAuth 的重新導向 URI 與 `AUTH_URL` 不一致 | 第 4 節的網址要與 `AUTH_URL` 完全相同 |
 | 專案收到 `401` | 虛擬金鑰錯了或已撤銷 | 到「應用程式」頁重新簽發 |
 | 專案收到 `429`，訊息含 `budget_exceeded` | 那個軟體超過了它的每月上限 | 到「應用程式」頁提高或解除上限。**專案端不要自動重試這個錯誤** |
@@ -705,6 +713,16 @@ cd /opt/costscale && bash scripts/run-fx-fetch.sh
 | 「新增上游金鑰」一直停在排隊中 | 第 7 節的 `apply-upstream-key.py` 排程沒裝，或 spool 目錄權限不對 | 補排程；重做第 5 節的 `chown` |
 | `docker compose up` 報 `Pool overlaps` | 主機本身的網路也用 10.87.213.0/24 | 見第 9.1 節 |
 | 儀表板金額全是 0 | 還沒有任何呼叫經過閘道 | 先做第 8 節 |
+
+### 改完 `.env` 怎麼生效
+
+改了 `.env` 之後，**`docker compose restart` 不會讀到新的值**，容器會沿用舊設定。要用 `up -d` 重建：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d
+```
+
+這一行只會重建設定有變的服務，沒變的不動。跑完重新做第 5 節的「確認」。
 
 完整的操作說明在儀表板右上角的「使用說明」。
 
