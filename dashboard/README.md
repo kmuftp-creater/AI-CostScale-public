@@ -20,7 +20,7 @@ AI 用量與成本管理中心，Next.js App Router + TypeScript。Phase 1：閘
    LITELLM_BASE_URL=http://127.0.0.1:4000
    LITELLM_MASTER_KEY=<與根目錄 .env 的 LITELLM_MASTER_KEY 一致>
 
-   # Auth.js（Google OAuth 白名單制）
+   # Auth.js（帳號密碼登入與 Google OAuth 白名單制，擇一或並用；本機開發直接用 AUTH_DISABLED=1 即可）
    AUTH_SECRET=<與根目錄 .env 的 AUTH_SECRET 一致，或自行產生>
    AUTH_GOOGLE_ID=
    AUTH_GOOGLE_SECRET=

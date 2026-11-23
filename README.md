@@ -48,7 +48,7 @@
 
 - 一台 Linux 主機（2 GB 記憶體以上），裝好 Docker 與 Compose 外掛 v2.24.4 以上
 - 兩個網域（儀表板一個、閘道一個）
-- 一個 Google 帳號（儀表板用 Google 登入）
+- 儀表板用管理員帳號密碼登入，不需要 Google 帳號（Google 登入為選用）
 - 用訂閱橋接的話，再加一台 Windows 電腦
 
 ## 安裝

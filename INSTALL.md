@@ -24,7 +24,7 @@
 ```
 
 - **閘道**替你保管所有供應商的真金鑰。專案只拿到閘道發的虛擬金鑰，每一筆呼叫都記帳。
-- **儀表板**看花費、發金鑰、設每月上限。只有白名單裡的 Google 帳號能登入。
+- **儀表板**看花費、發金鑰、設每月上限。預設用管理員帳號密碼登入，不用設定 Google；也可以另外開啟 Google 登入（白名單制）。
 - **訂閱橋接**是選用的。沒裝的話 `sub-*` 這幾個模型打不通，其他一切照常。
 
 ---
@@ -39,7 +39,7 @@
 
 1. 一台 Ubuntu 22.04 或 24.04 的主機，2 GB 記憶體以上，用 root 登入。
 2. 兩個網域，各建一筆 A 紀錄指到這台主機的 IP：一個給儀表板（例如 `cost.example.com`），一個給閘道（例如 `llm.example.com`）。DNS 沒生效時，腳本會停在申請憑證那一步並告訴你怎麼補，其他部分不受影響。網域經過 Cloudflare 代理（橘色雲朵），或主機在 NAT 後面時，解析到的 IP 本來就不是主機的對外 IP，要加 `--skip-dns-check`（見下方「選項」）。
-3. 一組 Google OAuth 用戶端（做法見第 4 節）。腳本會印出要填的重新導向 URI。還沒準備好可以先跳過，裝好之後再補。
+3. 想好一組管理員帳號與密碼（密碼至少 10 個字元）。腳本會問你，不需要任何 Google 設定。想用 Google 登入的話，再另外準備一組 Google OAuth 用戶端（做法見第 4 節，選用）。
 4. 一把 Gemini 免費金鑰，到 <https://aistudio.google.com/apikey> 建立。可以先跳過。
 
 ### 三行指令
@@ -74,12 +74,15 @@ bash /opt/costscale/scripts/install.sh
 |---|---|
 | 儀表板網域 | 例如 `cost.example.com`。貼整個網址也可以，腳本會自動去掉前面的 `https://` 與後面的斜線 |
 | 閘道網域 | 例如 `llm.example.com`，要與儀表板不同；兩個填成一樣時會請你重填 |
-| 可登入的 Google 帳號 | 逗號分隔，只有這些帳號登得進儀表板。只收英數與 `.` `_` `%` `+` `-`，加上 `@` 與網域，逗號前後的空白會自動去掉 |
-| Google OAuth 用戶端 ID 與密鑰 | 第 4 節拿到的兩個值；可以按 Enter 跳過。**只有填了 ID 才會接著問密鑰**；ID 留空就整組跳過 |
+| 登入方式 | `1` 帳號密碼（預設，直接按 Enter 就是它，建議）、`2` Google、`3` 兩種都要。**只有 `.env` 裡還沒有任何登入設定時才會問**；已經設好的重跑不會再問、也不會更動 |
+| 管理員帳號 | 選 `1` 或 `3` 才問。只收英數與 `.` `_` `-`，3 到 32 個字元，直接按 Enter 用 `admin` |
+| 管理員密碼 | 選 `1` 或 `3` 才問。輸入兩次、畫面不顯示，至少 10 個字元，兩次不一樣會重問。`.env` 裡只存雜湊，不存明碼 |
+| 可登入的 Google 帳號 | 選 `2` 或 `3` 才問。逗號分隔，只有這些帳號能用 Google 登入。只收英數與 `.` `_` `%` `+` `-`，加上 `@` 與網域，逗號前後的空白會自動去掉。帳號密碼登入不看這個清單 |
+| Google OAuth 用戶端 ID 與密鑰 | 選 `2` 或 `3` 才問。第 4 節拿到的兩個值；可以按 Enter 跳過（結尾會提醒「還不能登入」）。**只有填了 ID 才會接著問密鑰**；ID 留空就整組跳過 |
 | Gemini 免費金鑰 | 可以按 Enter 跳過 |
 | Let's Encrypt 信箱 | 憑證快到期時用來通知你；繼續即代表同意 Let's Encrypt 使用條款。**只有 `--tls letsencrypt`（預設）且這台主機還沒有該網域的憑證時才會問**，`--tls selfsigned` 與 `--tls skip` 不會問 |
 
-Google ID、密鑰與 Gemini 金鑰會原樣寫進 `.env`，所以不能含空白、引號（`'` 或 `"`）、`$`、反引號；含有這些字元時腳本會請你重填。
+Google ID、密鑰與 Gemini 金鑰會原樣寫進 `.env`，所以不能含空白、引號（`'` 或 `"`）、`$`、反引號；含有這些字元時腳本會請你重填。管理員密碼不受這個限制（它只以雜湊存放），但不能含換行與控制字元，最長 256 個字元。
 
 答案會存進 `/opt/costscale/.env` 這個設定檔，已經填過的項目重跑時會直接沿用，不再問。
 
@@ -96,7 +99,7 @@ HTTPS 的做法用 `--tls` 選擇：
 | `--tls skip` | 不動 nginx，HTTPS 由你自己處理 |
 | `--skip-dns-check` | 只對 `--tls letsencrypt` 有用：略過 DNS 比對。網域經過 Cloudflare 代理（橘色雲朵）或主機在 NAT 後面時使用。Let's Encrypt 仍要能從外網連到這台主機的 80 埠，申請不到憑證時仍會停下並說明 |
 
-不想被問問題（例如從自動化腳本執行），加 `--non-interactive`，答案改由環境變數 `CS_DASH_DOMAIN`、`CS_GW_DOMAIN`、`CS_ALLOWED_EMAILS`、`CS_GOOGLE_ID`、`CS_GOOGLE_SECRET`、`CS_GEMINI_FREE_KEY`、`CS_LE_EMAIL` 提供。完整說明：
+不想被問問題（例如從自動化腳本執行），加 `--non-interactive`，答案改由環境變數 `CS_DASH_DOMAIN`、`CS_GW_DOMAIN`、`CS_ADMIN_USER`、`CS_ADMIN_PASSWORD`、`CS_ALLOWED_EMAILS`、`CS_GOOGLE_ID`、`CS_GOOGLE_SECRET`、`CS_GEMINI_FREE_KEY`、`CS_LE_EMAIL` 提供。登入方式至少要給一種：有給 `CS_ADMIN_PASSWORD` 就設定帳號密碼登入（帳號用 `CS_ADMIN_USER`，省略時是 `admin`），有給 `CS_GOOGLE_ID` 與 `CS_GOOGLE_SECRET` 就設定 Google 登入。兩種都沒給、`.env` 裡也沒有，腳本會報錯結束，不會裝出一個誰都登不進去的系統。完整說明：
 
 ```bash
 bash /opt/costscale/scripts/install.sh --help
@@ -108,17 +111,21 @@ bash /opt/costscale/scripts/install.sh --help
 
 **唯一的例外是 `AUTH_DISABLED`**：腳本「不改 `.env` 已有的值」，只有這個欄位例外。每次執行時，只要它不是 `0`，腳本就改回 `0`，並在畫面上印出「偵測到 AUTH_DISABLED=1，已改回 0」與原因。原因是設成 `1` 代表儀表板不用登入，任何人連得到網址就能看花費與金鑰；這支腳本是裝正式環境用的，所以不留這個口子。只在本機或內網測試、確定要關掉登入時，請在腳本跑完後再手動把它改回 `1`，並執行下面的 `up -d`。
 
-### 跳過 Google 登入設定的話
+### 還沒設定任何登入方式的話
 
-腳本結尾會提醒「還不能登入儀表板」，「下一步」的第 1 步就是補 Google 登入設定，要先做完它才能登入儀表板。補上的做法：
+互動安裝時選了 Google 又把 ID 留空跳過，腳本結尾的確認項目「至少設定了一種登入方式」會是 `[未通過]`，並提醒「還不能登入儀表板」。這時登入頁會顯示「還沒有設定任何登入方式」，不會放行任何人。最快的補法是設定管理員帳號密碼，不需要 Google：
 
-1. 照第 4 節建立 OAuth 用戶端。
-2. 用 `nano /opt/costscale/.env` 把 `AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET` 換成拿到的值。
-3. 在 `/opt/costscale` 執行下面這行重建儀表板（`restart` 不會讀到新的 `.env`）：
+```bash
+bash /opt/costscale/scripts/set-admin-password.sh
+```
+
+腳本最後會印出一行 `docker compose` 指令，在 `/opt/costscale` 執行它讓設定生效（`restart` 不會讀到新的 `.env`）：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d
 ```
+
+要補的是 Google 登入的話：照第 4 節建立 OAuth 用戶端，用 `nano /opt/costscale/.env` 把 `AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET` 換成拿到的值，`AUTH_ALLOWED_EMAILS` 改成你的 Google 信箱，再執行上面那一行 `up -d`。
 
 ### 腳本做了哪些事
 
@@ -284,8 +291,9 @@ chmod 600 .env
 | `AUTH_SECRET` | 登入加密用，產生方式見下方 |
 | `AUTH_URL` | 儀表板網址，例如 `https://cost.example.com`（結尾不要斜線） |
 | `GATEWAY_PUBLIC_URL` | 閘道網址，例如 `https://llm.example.com` |
-| `AUTH_ALLOWED_EMAILS` | 可以登入儀表板的 Google 帳號，逗號分隔 |
-| `AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET` | 第 4 節拿到的兩個值 |
+| `AUTH_ADMIN_USER`、`AUTH_ADMIN_PASSWORD_HASH` | 管理員帳號與密碼雜湊。**不要手填**，照本節最後的「管理員帳號密碼」用腳本設定。登入方式至少要有這一種或下面的 Google 登入 |
+| `AUTH_ALLOWED_EMAILS` | 可以用 Google 登入的帳號，逗號分隔。只用帳號密碼登入的話留空（把範本的 `you@example.com` 刪掉） |
+| `AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET` | 選用。第 4 節拿到的兩個值；不用 Google 登入就留空 |
 | `ALERT_CRON_TOKEN` | 排程呼叫儀表板用，亂數 |
 | `OTEL_INGEST_TOKEN` | 用量收集器回報用，亂數 |
 | `BRIDGE_TOKEN` | 閘道呼叫訂閱橋接用，亂數。不裝橋接也填一個 |
@@ -301,9 +309,35 @@ openssl rand -hex 24
 
 > `AUTH_DISABLED` 必須是 `0`。設成 `1` 會完全跳過登入，任何人都看得到你的花費與金鑰清單。
 
+### 管理員帳號密碼
+
+帳號密碼登入是預設的登入方式，不需要設定 Google。`.env` 裡只存密碼的雜湊（scrypt，不是明碼），產生與寫入都交給下面這支腳本，不要手改這兩個欄位：
+
+```bash
+bash /opt/costscale/scripts/set-admin-password.sh
+```
+
+腳本會問帳號（Enter 沿用目前的，沒有就是 `admin`）與密碼（輸入兩次、畫面不顯示、至少 10 個字元），只取代 `.env` 裡的 `AUTH_ADMIN_USER` 與 `AUTH_ADMIN_PASSWORD_HASH` 兩行，其他行不動，權限維持 600。最後它會印出一行 `docker compose` 指令，要在 `/opt/costscale` 執行它，新設定才會生效（`restart` 不會讀到新的 `.env`）：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d
+```
+
+**改密碼**：同一支腳本再跑一次。`up -d` 之後，舊密碼立刻登不進去，用舊密碼登入中的瀏覽器也會被登出。
+
+**忘記密碼**：沒有「忘記密碼」的信件流程。你在這台主機上有 root 權限，就在主機上重跑同一支腳本設一個新的，再執行 `up -d`。登入頁本身不能重設密碼，這是刻意的，網路上的人沒有辦法重設。
+
+**連續輸錯會鎖多久**：同一個來源 IP 在 15 分鐘內輸錯 5 次，這個 IP 會被鎖 15 分鐘，鎖定期間即使密碼正確也一律拒絕，登入頁會顯示還要等幾分鐘。換別的 IP 不受影響。另外，全站 15 分鐘內輸錯超過 30 次之後，每一次嘗試都會多等 2 秒，用來拖慢換 IP 狂試的人，也不會把你自己整個鎖在外面。帳號錯與密碼錯顯示同一句話。
+
+鎖定的計數放在儀表板程式的記憶體裡，重啟儀表板容器（例如 `up -d` 重建）就歸零。鎖定以 nginx 傳來的 `X-Forwarded-For` 為準，所以第 6 節的 nginx 設定一定要用 `$remote_addr` 覆寫它；自己另外架 Cloudflare 或其他代理的話，要讓最後一層代理覆寫成真正的使用者 IP，否則所有人會被當成同一個 IP。
+
+不用腳本、純自動化的做法（例如安裝腳本的非互動模式）：用環境變數 `CS_ADMIN_USER`、`CS_ADMIN_PASSWORD` 提供，腳本不會問問題。
+
 ---
 
-## 4. 建立 Google 登入
+## 4. 建立 Google 登入（選用）
+
+只用帳號密碼登入的話，這一節整節跳過。要加上 Google 登入才做：
 
 1. 到 Google Cloud Console →「API 和服務」→「憑證」→「建立憑證」→「OAuth 用戶端 ID」。
 2. 應用程式類型選「網頁應用程式」。
@@ -314,7 +348,8 @@ openssl rand -hex 24
    ```
 
    （換成你自己的儀表板網域。要與 `.env` 的 `AUTH_URL` 完全一致，結尾不要多一個斜線，否則登入時會出現 `redirect_uri_mismatch`）
-4. 建立後把「用戶端 ID」填進 `.env` 的 `AUTH_GOOGLE_ID`，「用戶端密鑰」填進 `AUTH_GOOGLE_SECRET`。
+4. 建立後把「用戶端 ID」填進 `.env` 的 `AUTH_GOOGLE_ID`，「用戶端密鑰」填進 `AUTH_GOOGLE_SECRET`，並把可以登入的 Google 信箱填進 `AUTH_ALLOWED_EMAILS`（逗號分隔）。ID 與密鑰都是真值才會啟用 Google 登入，登入頁才會出現「使用 Google 登入」按鈕。
+5. 改完 `.env` 照第 13 節的「改完 `.env` 怎麼生效」重建儀表板。
 
 第一次設定 OAuth 同意畫面時，發布狀態選「測試中」並把自己加進測試使用者即可，不需要送審。
 
@@ -405,7 +440,9 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # 用 $remote_addr 覆寫，不要用 $proxy_add_x_forwarded_for：登入的輸錯鎖定以這個標頭
+        # 最左邊的 IP 為單位，用戶端自己帶的值必須丟掉，否則可以偽造 IP 繞過鎖定。
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         client_max_body_size 20m;
     }
@@ -461,7 +498,7 @@ sudo certbot --nginx -d cost.example.com -d llm.example.com
 
 ### 確認
 
-- 瀏覽器打開 `https://cost.example.com`，用白名單裡的 Google 帳號登入，看得到「總覽」頁。
+- 瀏覽器打開 `https://cost.example.com`，用你設定的登入方式（管理員帳號密碼，或白名單裡的 Google 帳號）登入，看得到「總覽」頁。
 - 從**你自己的電腦**（不是主機）執行：
 
   ```bash
@@ -726,6 +763,21 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db psql -
   不是幣別**——以台幣計價的海外服務（例如 OpenAI 的台灣訂價）帳單上照樣有那一行。
   非台幣計價的會自動填好；台幣計價的預設是「還沒確認」，等你對一次帳單再填。
 
+#### 2026-11-23 之後的版本：帳號密碼登入
+
+儀表板多了管理員帳號密碼登入，Google 登入改為選用。**原本用 Google 登入的人不用做任何事**，更新後照常能登入。想加上帳號密碼登入的話，做兩件事：
+
+1. 設定帳號密碼（做法見第 3 節最後的「管理員帳號密碼」），再依腳本最後印的那一行 `up -d` 讓它生效。
+2. 把 nginx 設定裡儀表板那一段的 `X-Forwarded-For` 改成覆寫，輸錯鎖定才認得到真正的來源 IP。用安裝腳本裝的主機，重跑一次 `bash /opt/costscale/scripts/install.sh`（帶原本的選項）就會自動改好並備份舊檔；手動裝的，用下面這一行改，再重新載入 nginx：
+
+```bash
+sed -i 's/proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;/proxy_set_header X-Forwarded-For \$remote_addr;/' /etc/nginx/sites-available/costscale
+```
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
 #### 2026-11-22 之後的版本：匯率排程改每小時
 
 以前裝的是每天跑一次（`20 5 * * *`），扣款日當天、排程跑過之後才新增的訂閱，
@@ -817,7 +869,11 @@ cd /opt/costscale && bash scripts/run-fx-fetch.sh
 
 | 現象 | 原因 | 怎麼辦 |
 |---|---|---|
-| 儀表板登入後回到登入頁 | 你的帳號不在 `AUTH_ALLOWED_EMAILS` | 加進 `.env` 後，照下方「改完 `.env` 怎麼生效」重建儀表板 |
+| 登入頁寫「還沒有設定任何登入方式」 | `.env` 裡帳號密碼與 Google 兩種都沒設定，或帳號格式、雜湊格式不對（儀表板的紀錄會有一行 `[auth]` 警告，不含雜湊內容） | 在主機上執行 `bash /opt/costscale/scripts/set-admin-password.sh`，再照下方「改完 `.env` 怎麼生效」重建儀表板 |
+| 帳號密碼登入顯示「帳號或密碼不正確」 | 帳號或密碼打錯（兩種錯誤顯示同一句，刻意不讓人猜帳號） | 確認大小寫；忘記密碼就在主機上重跑 `scripts/set-admin-password.sh`，再 `up -d` |
+| 登入頁顯示「輸錯次數太多，請等 N 分鐘後再試」 | 同一個 IP 15 分鐘內輸錯 5 次，鎖 15 分鐘，鎖定期間密碼正確也不行 | 等它到期；要馬上解除就重建儀表板容器（在 `up -d` 指令後面加 `--force-recreate dashboard`；鎖定計數放在記憶體，重啟歸零）。所有人都被鎖在同一個 IP 的話，檢查 nginx 的 `X-Forwarded-For` 有沒有照第 6 節覆寫 |
+| 改了密碼，舊密碼還登得進去 | 改完 `.env` 沒有 `up -d`（`restart` 不會讀新值） | 照下方「改完 `.env` 怎麼生效」重建儀表板 |
+| 用 Google 登入後回到登入頁 | 你的帳號不在 `AUTH_ALLOWED_EMAILS`（帳號密碼登入不受這個清單影響） | 加進 `.env` 後，照下方「改完 `.env` 怎麼生效」重建儀表板 |
 | Google 登入顯示 `redirect_uri_mismatch` | OAuth 的重新導向 URI 與 `AUTH_URL` 不一致 | 第 4 節的網址要與 `AUTH_URL` 完全相同 |
 | 專案收到 `401` | 虛擬金鑰錯了或已撤銷 | 到「應用程式」頁重新簽發 |
 | 專案收到 `429`，訊息含 `budget_exceeded` | 那個軟體超過了它的每月上限 | 到「應用程式」頁提高或解除上限。**專案端不要自動重試這個錯誤** |
