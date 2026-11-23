@@ -9,6 +9,7 @@ import PriceModelClient from "./PriceModelClient";
 import ModelCatalogPanel from "@/components/ModelCatalogPanel";
 import { formatTokens, formatTaipei, sinceNow } from "@/lib/format";
 import { isLocalMode, LOCAL_KEY_NOTICE, LOCAL_KEY_STEPS, LOCAL_REMOVE_KEY_STEPS } from "@/lib/mode";
+import { PLACEHOLDER_KEY_TAIL } from "@/lib/placeholder-pool";
 import { Fragment } from "react";
 import {
   readUpstreamModels,
@@ -367,7 +368,11 @@ function KeyTable({ rows, upstream }: { rows: UpstreamKeyRow[]; upstream: Upstre
                   {k.provider}
                   {k.slot ? ` · 第 ${k.slot}／${k.poolSize} 把` : ""} · {shown}
                   {more}
-                  {missing > 0 ? ` · ${missing} 個部署閘道未載入` : ""}
+                  {k.tail === PLACEHOLDER_KEY_TAIL
+                    ? " · 這一格還沒填金鑰，閘道不會用到它；填了才會加入輪替"
+                    : missing > 0
+                      ? ` · ${missing} 個部署閘道未載入`
+                      : ""}
                   {/* 失效的金鑰要講在這裡：閘道輪替不會跳過壞掉的那一把（2026-09-21）。 */}
                   {(() => {
                     const c = catalogFor(upstream, k.envName);
@@ -434,7 +439,10 @@ export default async function KeysPage() {
   const providerKeys = inv.keys.filter((k) => k.kind === "provider");
   const otherCreds = inv.keys.filter((k) => k.kind !== "provider");
   const providers = [...new Set(providerKeys.map((k) => k.provider))];
-  const freeKeys = providerKeys.filter((k) => k.pricing === "free").length;
+  // 還沒填的欄位（範本佔位值）不算一把金鑰：剛裝好只填 1 把時，不該顯示 10 把。
+  const filledKeys = providerKeys.filter((k) => k.tail !== PLACEHOLDER_KEY_TAIL);
+  const emptySlots = providerKeys.length - filledKeys.length;
+  const freeKeys = filledKeys.filter((k) => k.pricing === "free").length;
   const neverUsed = providerKeys.filter((k) => !k.usage.lastSuccessAt);
 
   return (
@@ -444,12 +452,12 @@ export default async function KeysPage() {
         <div className="ledger-strip">
           <div className="ledger-cell">
             <span className="microlabel">上游金鑰</span>
-            <div className="hero-figure">{providerKeys.length}</div>
+            <div className="hero-figure">{filledKeys.length}</div>
             <div className="ledger-note">
               {isLocalMode() ? (
-                <>全部存在專案資料夾裡的 <code>.env</code>，不進版本控制</>
+                <>全部存在專案資料夾裡的 <code>.env</code>，不進版本控制{emptySlots > 0 ? `。另有 ${emptySlots} 個欄位還沒填` : ""}</>
               ) : (
-                <>全部存在 VPS 的 <code>/opt/costscale/.env</code>，權限 600，不進版本控制</>
+                <>全部存在 VPS 的 <code>/opt/costscale/.env</code>，權限 600，不進版本控制{emptySlots > 0 ? `。另有 ${emptySlots} 個欄位還沒填` : ""}</>
               )}
             </div>
           </div>
@@ -624,7 +632,7 @@ export default async function KeysPage() {
           <div className="panel-head">
             <span className="panel-title">上游金鑰</span>
             <span className="microlabel">
-              {providerKeys.length} 把 · 依計價型態排序 ·{" "}
+              {filledKeys.length} 把{emptySlots > 0 ? `，另有 ${emptySlots} 個欄位還沒填` : ""} · 依計價型態排序 ·{" "}
               {upstreamModels.fetchedAt
                 ? `模型清單抓取於 ${formatTaipei(upstreamModels.fetchedAt, true)}`
                 : "模型清單尚未抓取"}

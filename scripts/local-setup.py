@@ -895,7 +895,7 @@ def finish_message(ports_env, is_new):
         say("設定完成。下一步，在專案資料夾執行這一行啟動（第一次要下載映像並建置儀表板，約 3 到 10 分鐘）：")
         say("  docker compose up -d --build")
     else:
-        say("設定檢查完成。要讓 .env 的更動生效，在專案資料夾執行這一行（已經建置過的話，幾秒到一分鐘就好）：")
+        say("設定檢查完成。剛才有改動的話，在專案資料夾執行這一行讓它生效（已經建置過的話，幾秒到一分鐘就好）；沒有改動就不用執行：")
         say("  docker compose up -d")
     say("啟動後開 http://localhost:%d ，用剛才設定的管理員帳號登入。" % ports["DASH_PORT"])
     say("閘道網址是 http://localhost:%d（只有這台電腦上的程式連得到）。" % ports["GATEWAY_PORT"])
