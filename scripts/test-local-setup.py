@@ -52,6 +52,7 @@ def read_env(work):
 
 def new_work():
     w = tempfile.mkdtemp(prefix="cs-setup-test-")
+    os.chmod(w, 0o755)  # mkdtemp 預設 700，儀表板身分連資料夾都進不去，會誤判成「要退回 644」
     for f in (".env.example", "litellm-config.yaml"):
         shutil.copy(os.path.join(ROOT, f), os.path.join(w, f))
     return w
@@ -112,7 +113,11 @@ try:
     if os.name == "posix":
         mode = os.stat(os.path.join(work, "spool", "upstream-keys", "_tails.json")).st_mode & 0o777
         assert mode in (0o640, 0o644), oct(mode)
-        ok("_tails.json 權限 %s（其他人不可寫）" % oct(mode))
+        if os.geteuid() == 0:
+            # root 執行（例如在 Linux 容器裡）：本機檔案系統認得 uid／gid，應該收緊到 640，擁有者是儀表板的 uid 1001
+            st = os.stat(os.path.join(work, "spool", "upstream-keys", "_tails.json"))
+            assert mode == 0o640 and st.st_uid == 1001, (oct(mode), st.st_uid)
+        ok("_tails.json 權限 %s（其他人不可讀寫）" % oct(mode))
 
     # 5. 補第 2 把金鑰，再移除它：改回 placeholder，尾碼表跟著更新，其他金鑰不動
     code, out = run(work, {"CS_ACTION": "add-key", "CS_GEMINI_FREE_KEY": FAKE_KEY_B})
