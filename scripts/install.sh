@@ -325,6 +325,19 @@ check_environment() {
 
 # ────────────────────────────── 第 2 步：問答 ──────────────────────────────
 
+label_of() {
+  case "$1" in
+    DASH_DOMAIN) echo "儀表板網域" ;;
+    GW_DOMAIN) echo "閘道網域" ;;
+    ALLOWED_EMAILS) echo "可登入的 Google 帳號" ;;
+    GOOGLE_ID) echo "Google 用戶端 ID" ;;
+    GOOGLE_SECRET) echo "Google 用戶端密鑰" ;;
+    GEMINI_KEY) echo "Gemini 免費金鑰" ;;
+    LE_EMAIL) echo "Let's Encrypt 信箱" ;;
+    *) echo "$1" ;;
+  esac
+}
+
 chk_domain() { valid_domain "$(norm_domain "$1")"; }
 chk_emails() {
   local list e
@@ -355,7 +368,7 @@ ask() {
     local tag="" prompt
     [ "$required" -eq 1 ] || tag="（可以直接按 Enter 跳過）"
     while :; do
-      prompt="  ${var}${tag}："
+      prompt="  $(label_of "$var")${tag}："
       if [ "$secret" -eq 1 ]; then
         read -rs -p "$prompt" ans || die "讀不到輸入。要在沒有終端機的環境執行，請改用 --non-interactive" "不需要看紀錄"
         echo
