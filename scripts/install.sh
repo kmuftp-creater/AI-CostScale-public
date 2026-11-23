@@ -1482,8 +1482,8 @@ final_summary() {
   fi
   say "  ${n}. 儀表板 →「應用程式」→「新增軟體」，取個名字，複製只顯示一次的虛擬金鑰（sk- 開頭）。"
   n=$((n + 1))
-  say "  ${n}. 用那把金鑰打一次閘道，確認有回答："
-  say "     curl -s https://${GW_DOMAIN}/v1/chat/completions -H \"Authorization: Bearer sk-你的虛擬金鑰\" -H \"Content-Type: application/json\" -d '{\"model\":\"gemini-flash-free\",\"messages\":[{\"role\":\"user\",\"content\":\"用一句話自我介紹\"}]}'"
+  say "  ${n}. 用那把金鑰打一次閘道，確認有回答（macOS、Linux、Git Bash 用這一行；Windows PowerShell 用的指令在儀表板總覽的上手清單第 3 步，或 INSTALL.md 第 8 節）："
+  say "     curl -s https://${GW_DOMAIN}/v1/chat/completions -H \"Authorization: Bearer sk-你的虛擬金鑰\" -H \"Content-Type: application/json\" -d '{\"model\":\"gemini-flash-free\",\"messages\":[{\"role\":\"user\",\"content\":\"Introduce yourself in one sentence, in Traditional Chinese.\"}]}'"
   n=$((n + 1))
   say "  ${n}. 回儀表板「總覽」，幾秒內會看到這一筆呼叫與花費。"
   [ "$no_login" -eq 1 ] || say "  沒有瀏覽器時，也可以在主機上用 ${APP_DIR}/scripts/issue-key.sh test-app \"說明文字\" 發金鑰。"
