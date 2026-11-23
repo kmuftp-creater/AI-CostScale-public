@@ -1,12 +1,30 @@
 # AI CostScale 安裝說明
 
-想省事的話，直接用下面「快速安裝」那一節：一支腳本做完第 1 到 7 節。要手動安裝或腳本停住了要對照排錯，才照順序做第 1 到第 8 節。第 9 節以後都是選用：訂閱橋接、用量收集器、專案看板，要用再裝。
+先看下一節「我該選哪一種安裝方式」。只想在自己電腦上看花費：用「在自己電腦上安裝」，只需要 Docker。要裝在雲端主機：想省事就用「快速安裝」，一支腳本做完第 1 到 7 節；要手動安裝，或腳本停住了要對照排錯，才照順序做第 1 到第 8 節。第 9 節以後都是選用：訂閱橋接、用量收集器、專案看板，要用再裝。
 
 每一節最後都有一個「確認」步驟。**確認沒過就不要往下做**，後面的步驟都建立在前面的結果上。
 
 ---
 
-## 0. 裝完長什麼樣子
+## 我該選哪一種安裝方式
+
+| | 在自己電腦上安裝 | 雲端主機安裝 |
+|---|---|---|
+| 適合誰 | AI 專案都在自己這台電腦上跑，想看花費，不熟伺服器 | 專案分散在多台電腦、雲端服務、機器人，或要給別人用 |
+| 要準備什麼 | Docker（Windows、Mac 裝 Docker Desktop，Linux 裝 Docker Engine） | 一台 Ubuntu 主機、兩個網域 |
+| 儀表板網址 | `http://localhost:3000`，只有這台電腦打得開 | `https://你的網域` |
+| 登入 | 管理員帳號密碼 | 管理員帳號密碼，可另外開 Google 登入 |
+| 誰連得到閘道 | 只有這台電腦上的程式 | 任何拿到虛擬金鑰的程式與服務 |
+| 電腦關機時 | 閘道不通，也不記帳 | 照常運作 |
+| 閘道看門狗、儀表板新增上游金鑰 | 沒有 | 有 |
+| 安裝時間 | 約 10 分鐘（含下載與建置） | 約 10 分鐘，另加申請網域與 DNS 生效的時間 |
+| 之後想換成另一種 | 重新安裝；本專案沒有提供搬資料的工具 | 同左 |
+
+不確定的話，先選「自己電腦」：裝好之後 10 分鐘內就看得到儀表板，不滿意可以完整移除（見本節的「停止、啟動與完整移除」）。要讓別台電腦、雲端服務、別人的程式呼叫閘道，才需要雲端主機安裝（下一節「快速安裝」）。
+
+---
+
+## 0. 雲端主機安裝完長什麼樣子
 
 ```
           你的專案（網站、機器人、腳本）
@@ -29,7 +47,242 @@
 
 ---
 
-## 快速安裝（建議）
+## 在自己電腦上安裝（不需要主機與網域）
+
+### 適合誰
+
+你的 AI 專案都在自己這台電腦上跑（網站、腳本、機器人、桌面工具），想知道每個專案花了多少錢。這一節只需要 Docker：不用租主機、不用網域、不用 nginx 與 HTTPS、不用 Google 帳號，不用裝 bash 或 python。
+
+### 前置條件
+
+1. **Docker。**
+   - Windows、Mac：安裝 Docker Desktop，下載頁 <https://www.docker.com/products/docker-desktop/>。裝好後**先打開它**，等視窗左下角顯示引擎執行中（Engine running）再繼續。以後每次要用儀表板，Docker Desktop 都要開著。
+   - Linux：安裝 Docker Engine 與 Compose 外掛，步驟見 <https://docs.docker.com/engine/install/>。
+   - 確認：在終端機（Windows 開 PowerShell）執行 `docker compose version`，要顯示 `v2.24.4` 或更新的版本。
+2. 取得程式碼用的工具：`git`，或是直接到 GitHub 頁面按「Code → Download ZIP」下載後解壓縮。
+3. 約 5 GB 的磁碟空間（映像與資料庫），以及連得上外網的網路（下載映像、建置時下載字型）。
+4. 想好一組管理員密碼（至少 10 個字元）。一把 Gemini 免費金鑰可以現在建立：<https://aistudio.google.com/apikey>，也可以之後再加。
+5. 這台電腦的 3000、4000、5442 三個埠沒有被別的程式佔用。被佔用也沒關係，裝好之後改埠即可（見下方「常見問題」）。
+
+### 三步安裝
+
+指令在 Windows PowerShell、Mac 與 Linux 的終端機都相同，每一步都只有一行。
+
+**步驟 1：取得程式碼。**程式碼放在哪個資料夾都可以，路徑含空白或中文也可以。
+
+```
+git clone https://github.com/kmuftp-creater/AI-CostScale-public.git costscale
+```
+
+```
+cd costscale
+```
+
+用下載 zip 的話，解壓縮之後在這個資料夾裡開終端機（Windows：在資料夾空白處按住 Shift 按右鍵，選「在此處開啟 PowerShell 視窗」），以下指令都在這個資料夾裡執行。
+
+**步驟 2：設定。**
+
+```
+docker compose -f docker-compose.setup.yml run --rm setup
+```
+
+第一次執行會先下載 `python:3.12-slim` 映像（約 50 MB）。接著依序問你三題：
+
+| 問題 | 怎麼答 |
+|---|---|
+| 管理員帳號 | 直接按 Enter 用 `admin`。要英數開頭，其餘只收英數與 `.` `_` `-`，3 到 32 個字元 |
+| 管理員密碼 | 輸入兩次，**輸入時畫面不會顯示任何字元**（這是正常的），至少 10 個字元，兩次不一樣會重問 |
+| Gemini 免費金鑰 | 貼上金鑰後按 Enter（輸入時同樣不顯示），沒有就直接按 Enter 跳過 |
+
+做完會看到「已建立 .env」與重點清單，最後印出下一步的指令。資料庫密碼、閘道主金鑰等亂數祕密由工具自動產生；`.env` 裡只存密碼的雜湊，不存密碼本身；密碼與金鑰都不會印在畫面上。專案資料夾裡會多出 `.env` 這個檔案，**裡面有祕密，不要傳給別人、不要上傳到網路**。
+
+這個步驟也可以不問問題（寫腳本或不想互動時），見下方「設定工具的進階用法」。
+
+**步驟 3：啟動。**
+
+```
+docker compose up -d --build
+```
+
+第一次要下載閘道映像並建置儀表板，約 3 到 10 分鐘，中間畫面會捲動很多行，請等它跑完。結束時最後幾行是 `Container ... Started`，指令退出碼為 0。
+
+之後開瀏覽器到 `http://localhost:3000`，用步驟 2 設定的帳號密碼登入。
+
+### 怎麼確認成功
+
+1. 執行 `docker compose ps`。要看到四個服務都在執行：`db`、`litellm`、`dashboard`、`scheduler`，其中 `db` 與 `litellm` 的狀態要顯示 `(healthy)`。閘道第一次啟動約需 30 秒到 1 分鐘，剛啟動時顯示 `(health: starting)` 是正常的。
+2. 瀏覽器開 `http://localhost:3000`，會先導到登入頁；登入後看到總覽，最上方有「上手清單」。
+3. 清單的第 1 步（放入 AI 供應商金鑰）在步驟 2 貼了金鑰的話已經打勾。第 4 步（確認排程有在跑）會在啟動後 1 到 3 分鐘內自動打勾：排程容器啟動後約 10 秒抓第一次匯率。看排程容器的紀錄：
+
+   ```
+   docker compose logs scheduler
+   ```
+
+   要看到 `[匯率] 成功` 與（啟動約 2 分鐘後）`[預算] 成功` 各一行。
+4. 第 2、3 步照第 8 節做：在「應用程式」新增軟體取得虛擬金鑰，再打一次呼叫。網址換成 `http://localhost:4000`：
+
+   PowerShell：
+
+   ```powershell
+   Invoke-RestMethod http://localhost:4000/v1/chat/completions -Method Post -Headers @{Authorization="Bearer sk-你的虛擬金鑰"} -ContentType "application/json" -Body '{"model":"gemini-flash-free","messages":[{"role":"user","content":"用一句話自我介紹"}]}'
+   ```
+
+   Mac、Linux：
+
+   ```bash
+   curl -s http://localhost:4000/v1/chat/completions -H "Authorization: Bearer sk-你的虛擬金鑰" -H "Content-Type: application/json" -d '{"model":"gemini-flash-free","messages":[{"role":"user","content":"用一句話自我介紹"}]}'
+   ```
+
+   Gemini 免費額度的上游偶爾回 `503`（`high demand`），過幾秒再打一次即可。另外 `gemini-flash-free` 是 5 把金鑰輪替，只放了一把時，其他 4 個欄位還是佔位字，輪到它們會回 `401`，閘道會自動重試 2 次；仍然失敗就再打一次。閘道會把回 401 的欄位暫停一小段時間，之後比較穩。
+
+   在 Docker 容器裡跑的專案，網址用 `http://host.docker.internal:4000`（Docker Desktop；Linux 要替那個容器加 `--add-host=host.docker.internal:host-gateway`）。
+
+### 加 AI 金鑰
+
+本機安裝模式的儀表板**不能**在網頁上新增金鑰：「金鑰管理」頁的「新增上游金鑰」那一塊會改顯示本機做法，按移除或改設定也會被擋下並說明原因（原因：那些操作要排進佇列，由雲端主機上的排程套用，本機模式沒有那支排程，送出的請求會永遠排隊）。正式做法是再跑一次設定工具：
+
+```
+docker compose -f docker-compose.setup.yml run --rm setup
+```
+
+選 `2) 新增 AI 金鑰`，選供應商、貼上金鑰（輸入時畫面不顯示）。可以選 Gemini 免費額度、Groq、OpenRouter、Gemini 付費金鑰。工具把金鑰填進第一個還是空的欄位（例如 `GEMINI_FREE_KEY_2`），欄位都滿了會告訴你要編輯 `.env` 的哪一行。然後執行這一行讓閘道讀到新金鑰（閘道會重建，約 30 秒內打不通）：
+
+```
+docker compose up -d
+```
+
+設定工具不會先向供應商驗證金鑰。要確認金鑰有效，到「金鑰管理」頁看新金鑰有沒有出現尾 4 碼，再照上面第 4 點打一次呼叫。
+
+### 怎麼改密碼
+
+不需要 bash，一樣用設定工具：
+
+```
+docker compose -f docker-compose.setup.yml run --rm setup
+```
+
+選 `3) 更改管理員帳號或密碼`，照畫面輸入。然後執行這一行，只重建儀表板：
+
+```
+docker compose up -d dashboard
+```
+
+舊密碼的登入狀態在新設定生效後一併失效。
+
+### 設定工具的進階用法
+
+已經有 `.env` 時，設定工具**不會覆蓋**它：
+
+- 互動執行會先顯示選單（補齊缺少的欄位、新增 AI 金鑰、更改管理員帳號或密碼、更改埠號）。
+- 非互動執行（沒有終端機，或加 `-T`）只做「補齊缺少的欄位」：缺的欄位用預設值補上，還是範本值的祕密換成新的亂數，`AUTH_DISABLED` 不是 `0` 就改回 `0`，已有的值一律不動。什麼都不用補時，`.env` 的內容完全不變。
+
+不問問題、直接用環境變數提供答案（缺少必要的值會報錯結束）：
+
+| 環境變數 | 說明 |
+|---|---|
+| `CS_ADMIN_USER` | 管理員帳號，省略時用 `admin` |
+| `CS_ADMIN_PASSWORD` | 管理員密碼。第一次設定必填 |
+| `CS_GEMINI_FREE_KEY`、`CS_GROQ_KEY`、`CS_OPENROUTER_KEY`、`CS_GEMINI_PAID_KEY` | 各家的 AI 金鑰，可省略 |
+| `CS_DASH_PORT`、`CS_GATEWAY_PORT`、`CS_DB_PORT` | 三個埠，省略時用 3000、4000、5442 |
+| `CS_ACTION` | `init`（預設）、`add-key`、`password`、`ports`，對應選單的四個選項 |
+
+PowerShell 範例（用完把密碼從環境變數移除；不要把密碼直接寫在指令列，會留在歷史紀錄）：
+
+```powershell
+$env:CS_ADMIN_PASSWORD = "你的密碼"
+docker compose -f docker-compose.setup.yml run --rm setup
+Remove-Item Env:CS_ADMIN_PASSWORD
+```
+
+Mac、Linux：
+
+```bash
+read -rs CS_ADMIN_PASSWORD && export CS_ADMIN_PASSWORD
+docker compose -f docker-compose.setup.yml run --rm setup
+unset CS_ADMIN_PASSWORD
+```
+
+### 更新到新版
+
+用 git 取得的：
+
+```
+git pull
+```
+
+```
+docker compose up -d --build
+```
+
+用 zip 的：下載新版 zip 解壓縮到新的資料夾，把舊資料夾的 `.env` 與 `spool` 資料夾複製進去，再在新資料夾執行 `docker compose up -d --build`。資料庫放在 Docker 的資料卷 `costscale_dbdata`，與資料夾無關，換資料夾不會遺失資料。
+
+新版如果多了 `db/init/` 底下的 SQL 檔，要手動套用一次（第 12 節有哪些檔案要套）。下面兩行不依賴 shell 的重導向，Windows 也能用，把 `28-xxx.sql` 換成實際檔名：
+
+```
+docker compose cp db/init/28-xxx.sql db:/tmp/update.sql
+```
+
+```
+docker compose exec db psql -U costscale -d costscale -f /tmp/update.sql
+```
+
+### 停止、啟動與完整移除
+
+暫時停止（資料保留，之後 `docker compose up -d` 就回來）：
+
+```
+docker compose stop
+```
+
+移除容器與網路，**資料庫的資料保留**，之後 `docker compose up -d` 可以接著用：
+
+```
+docker compose down
+```
+
+**完整移除，連資料庫的資料一起刪除。這會永久刪掉所有花費紀錄、軟體與虛擬金鑰，無法復原，執行前先確認真的不要了：**
+
+```
+docker compose down -v --rmi local
+```
+
+再把專案資料夾刪掉，`.env` 也會一起消失。只刪資料夾、沒有執行上面這行的話，Docker 裡的資料還在，之後重裝會接上舊資料，但新產生的 `.env` 資料庫密碼對不上，閘道與儀表板會連不上資料庫（見常見問題）。
+
+電腦重新開機之後：Docker Desktop 啟動時會自動把這四個容器帶起來（容器設定了 `restart: unless-stopped`）。要讓 Docker Desktop 隨登入自動啟動，到它的設定裡開啟 Start Docker Desktop when you sign in to your computer。
+
+### 限制
+
+本機安裝模式是「看自己電腦上的 AI 花費」用的精簡版，有這些限制：
+
+- **只有這台電腦上的程式連得到閘道與儀表板。**埠一律只綁在 `127.0.0.1`。**不要把埠改成對外**（例如把 `127.0.0.1` 換成 `0.0.0.0`）：本機模式沒有 nginx 擋在前面，也沒有 HTTPS，直接對外等於把登入頁與閘道裸露在網路上。要給別台電腦、雲端服務使用，請改用雲端主機安裝。
+- **電腦關機、或 Docker 沒開，閘道就不通，也不會記帳。**專案要自己處理閘道連不上的情況。
+- **沒有閘道看門狗。**容器當掉時 Docker 會依 `restart: unless-stopped` 重啟，但「還活著卻不健康」的閘道不會被自動重啟；發現打不通時執行 `docker compose restart litellm`。
+- **儀表板不能直接新增、移除上游金鑰，也不能改模型單價與模型對應。**這些操作要由主機端排程套用，要操作 Docker，本機模式不提供。加金鑰用上面的設定工具；改模型設定要編輯 `litellm-config.yaml` 後執行 `docker compose restart litellm`。「金鑰管理」頁的「可用模型」清單由主機排程每 6 小時抓一次，本機模式沒有這支排程，那一欄會一直顯示尚未抓取。
+- **登入鎖定是全站共用一組。**本機沒有 nginx，儀表板不信任 `X-Forwarded-For`，所有來源算同一個。連續輸錯 5 次，整個登入鎖 15 分鐘（含你自己）。要立刻解除：`docker compose up -d --force-recreate dashboard`。
+- **這些選用功能不在本機模式的範圍，沒有測試過：**訂閱橋接（第 9 節）、訂閱用量收集器（第 10 節）、專案看板（第 11 節）、Vertex AI、GCP 用量與帳單抓取。它們需要的主機路徑（`/root/vertex-sa.json`）、SSH 隧道、cron 排程在本機模式都沒有準備，儀表板上對應的區塊會顯示「沒有資料」。
+- **排程只有兩支：**匯率與訂閱月費入帳、預算檢查，各每小時一次，由 `scheduler` 容器執行（紀錄用 `docker compose logs scheduler` 看）。電腦關機期間不執行，開機後補跑一次。預算超標的告警會顯示在儀表板橫幅；要收告警信，在 `.env` 填 `ALERT_EMAIL_TO` 與 `SMTP_*`，再執行 `docker compose up -d`。
+- **網路網段固定為 `10.87.213.0/24`**（雲端主機模式的訂閱橋接需要它）。本機模式沒有橋接，與別的網路衝突時可以改，見常見問題。
+
+### 常見問題
+
+| 現象 | 原因 | 怎麼辦 |
+|---|---|---|
+| 執行任何 `docker` 指令都報連不上 Docker：`error during connect`（Windows、Mac）或 `Cannot connect to the Docker daemon`（Linux） | Docker Desktop 沒開，或還在啟動 | 打開 Docker Desktop，等到顯示引擎執行中，再重新執行同一行指令 |
+| 啟動時報 `Error response from daemon: failed to set up container networking: ... Bind for 127.0.0.1:4000 failed: port is already allocated`（實測：4000 被另一個 Docker 容器佔用時的原文；被 Docker 以外的程式佔用時，結尾的原因文字不同，但一樣有 `Bind for 127.0.0.1:埠號 failed`） | 訊息裡那個埠（這裡是 4000；儀表板是 3000、資料庫是 5442）已經被這台電腦上的另一個程式佔用。這時其他服務照常起來，只有那一個服務停在 `Created`（沒有啟動） | 執行設定工具，選 `4) 更改埠號`，把被佔用的那個改成沒人用的（例如閘道改 14000），再 `docker compose up -d`，那個服務就會起來。非互動做法：`CS_ACTION=ports` 加 `CS_GATEWAY_PORT=14000`。設定工具會一併更新 `.env` 裡的 `AUTH_URL` 與 `GATEWAY_PUBLIC_URL` |
+| 啟動時報 `failed to create network costscale_default: Error response from daemon: invalid pool request: Pool overlaps with other one on this address space` | 另一個 Docker 網路（例如先前裝過的 AI CostScale，即使它的容器已經停止）佔用了 `10.87.213.0/24` | 用文字編輯器打開 `.env`，加兩行：`COSTSCALE_SUBNET=10.87.214.0/24` 與 `COSTSCALE_GATEWAY=10.87.214.1`（網段換成沒被用的），再 `docker compose up -d`。要先看有哪些網段已被用：`docker network ls`，再對每個網路執行 `docker network inspect 網路名稱` |
+| 建置時出現 `font/google` 之類的錯誤 | 建置儀表板時要連 `fonts.googleapis.com` 下載字型，網路暫時不通 | 建置步驟已自動重試 3 次；仍失敗就等網路恢復，重新執行同一行 `docker compose up -d --build`，不會從頭來過 |
+| 打開 `http://localhost:3000` 沒有回應 | 儀表板還在啟動，或 Docker 沒開 | 等 30 秒；執行 `docker compose ps` 與 `docker compose logs dashboard` 看狀態 |
+| 登入頁寫「登入功能已停用：AUTH_SECRET 還沒設好」 | `.env` 的 `AUTH_SECRET` 是空值、範本預設值或短於 32 個字元 | 重新執行設定工具（選 `1`），它會補上新的亂數，再 `docker compose up -d dashboard` |
+| 登入頁寫「還沒有設定任何登入方式」 | `.env` 沒有管理員帳號或雜湊 | 執行設定工具選 `3`，再 `docker compose up -d dashboard` |
+| 登入頁顯示「輸錯次數太多，請等 N 分鐘後再試」 | 連續輸錯 5 次，鎖 15 分鐘（本機模式全站共用） | 等它到期，或 `docker compose up -d --force-recreate dashboard` |
+| 上手清單第 4 步一直沒打勾 | `scheduler` 容器沒在跑，或抓匯率失敗（網路不通） | `docker compose ps` 看 `scheduler` 是否在執行；`docker compose logs scheduler` 看失敗原因。排程失敗會每 5 分鐘重試 |
+| 「新增上游金鑰」顯示本機安裝模式的說明 | 本機模式不提供這個功能 | 照該畫面與上方「加 AI 金鑰」的做法 |
+| 日誌出現 `password authentication failed for user "costscale"` | 刪掉了 `.env`、卻沒有刪資料庫資料卷，新產生的資料庫密碼對不上舊資料 | 找回原本的 `.env` 放回資料夾；確定舊資料不要了，才執行 `docker compose down -v`（會刪除資料），再重做三步 |
+| 另一份 AI CostScale 資料夾執行 `docker compose up` 把這份的容器換掉了 | 兩份資料夾的專案名稱都是 `costscale`，Docker 把它們當同一個專案 | 同一台電腦只留一份；一定要並存的話，每個 `docker compose` 指令都加 `-p 另一個名字` |
+
+---
+
+## 快速安裝（雲端主機，建議）
 
 第 1 到 7 節的工作，已經寫成一支互動式腳本 `scripts/install.sh`。它會裝工具、問你幾個問題、產生 `.env`、啟動服務、設定 nginx 與 HTTPS、安裝必要排程。多數人用這一節就夠了，做完直接接第 8 節。
 
@@ -997,7 +1250,7 @@ cd /opt/costscale && bash scripts/run-fx-fetch.sh
 | 專案收到 `429`，訊息含 `budget_exceeded` | 那個軟體超過了它的每月上限 | 到「應用程式」頁提高或解除上限。**專案端不要自動重試這個錯誤** |
 | `400 no healthy deployments` | 那個模型沒有可用的上游金鑰，或 `sub-*` 橋接沒連上 | 檢查 `.env` 的金鑰；橋接見第 9.6 節 |
 | `sub-*` 回 `429`，訊息在講額度 | 橋接的額度保留線：該訂閱剩餘不到 20% | 等額度重設，或改走 API 模型 |
-| 「新增上游金鑰」一直停在排隊中 | 第 7 節的 `apply-upstream-key.py` 排程沒裝，或 spool 目錄權限不對 | 補排程；重做第 5 節的 `chown` |
+| 「新增上游金鑰」一直停在排隊中 | 第 7 節的 `apply-upstream-key.py` 排程沒裝，或 spool 目錄權限不對（本機安裝模式沒有這支排程，儀表板會直接說明本機做法，不會排隊） | 補排程；重做第 5 節的 `chown` |
 | `docker compose up` 報 `Pool overlaps` | 主機本身的網路也用 10.87.213.0/24 | 見第 9.1 節 |
 | 儀表板金額全是 0 | 還沒有任何呼叫經過閘道 | 先做第 8 節 |
 

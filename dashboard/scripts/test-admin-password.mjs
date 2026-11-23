@@ -258,4 +258,28 @@ ok("帳號要英數開頭；帳號 64、密碼 1024 字元的上限檢查");
 }
 
 
+// 10. 本機安裝模式的設定工具（scripts/local-setup.py）算的雜湊，要與 set-admin-password.sh 同格式，且儀表板驗證通過
+{
+  const localSetup = path.resolve(here, "../../scripts/local-setup.py");
+  const pyLocal = (pw) =>
+    execFileSync("python3", ["-I", localSetup, "--hash-stdin"], { input: pw, encoding: "utf8", windowsHide: true }).trim();
+  for (const pw of ["Local-Setup-Pass-1", "中文密碼也要能用-12345", "p".repeat(256), "a b\tc  'q' \"d\" $x `y`"]) {
+    const h = pyLocal(pw);
+    const parsed = parseHash(h);
+    assert.ok(parsed, "local-setup.py 的雜湊格式要被儀表板接受");
+    assert.deepEqual([parsed.n, parsed.r, parsed.p, parsed.salt.length, parsed.hash.length], [16384, 8, 1, 16, 32], "參數要與 set-admin-password.sh 相同");
+    assert.ok(!h.includes("$"), "雜湊不得含 $");
+    const cfg = getAdminConfig({ AUTH_ADMIN_USER: "admin", AUTH_ADMIN_PASSWORD_HASH: h });
+    assert.ok(cfg);
+    assert.equal(await verifyAdminLogin(cfg, "admin", pw), true, "正確密碼要通過");
+    assert.equal(await verifyAdminLogin(cfg, "admin", pw + "x"), false, "錯誤密碼不得通過");
+  }
+  // 兩支腳本各算一次，格式與參數完全相同（salt 與雜湊值當然不同）
+  const a = parseHash(pyLocal("Same-Password-1"));
+  const b = parseHash(pyHash("Same-Password-1"));
+  assert.deepEqual([a.n, a.r, a.p, a.salt.length, a.hash.length], [b.n, b.r, b.p, b.salt.length, b.hash.length]);
+  ok("local-setup.py 的雜湊與 set-admin-password.sh 同格式同參數，儀表板驗證通過（含中文、特殊字元、256 字元）");
+}
+
+
 console.log(`\n全部通過（${pass} 組）`);

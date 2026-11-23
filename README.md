@@ -46,14 +46,31 @@
 
 ## 需要什麼
 
-- 一台 Linux 主機（2 GB 記憶體以上），裝好 Docker 與 Compose 外掛 v2.24.4 以上
-- 兩個網域（儀表板一個、閘道一個）
+有兩種裝法，依你的情況選一種（對照表在 [INSTALL.md 開頭](INSTALL.md)）：
+
+| | 在自己電腦上安裝 | 雲端主機安裝 |
+|---|---|---|
+| 適合 | AI 專案都在自己這台電腦上跑，想看花費 | 專案分散在多台電腦、雲端服務，或要給別人用 |
+| 需要 | Docker（Windows、Mac 用 Docker Desktop，Linux 用 Docker Engine），Compose v2.24.4 以上 | 一台 Linux 主機（2 GB 記憶體以上）、兩個網域 |
+| 網址 | `http://localhost:3000`，只有這台電腦打得開 | `https://你的網域` |
+
 - 儀表板用管理員帳號密碼登入，不需要 Google 帳號（Google 登入為選用）
-- 用訂閱橋接的話，再加一台 Windows 電腦
+- 用訂閱橋接的話（雲端主機安裝），再加一台 Windows 電腦
 
 ## 安裝
 
-最快的做法：照 **[INSTALL.md 的「快速安裝」](INSTALL.md)** 執行一支腳本，回答幾個問題就裝好。要手動安裝，照 **[INSTALL.md](INSTALL.md)** 第 1 到 8 節一節一節做，每一節都有確認步驟。
+**只想在自己電腦上看花費**（只需要 Docker，不用主機與網域）：三步（取得程式碼、設定、啟動），指令在 Windows PowerShell、Mac、Linux 都相同。完整說明見 **[INSTALL.md 的「在自己電腦上安裝」](INSTALL.md)**。
+
+```
+git clone https://github.com/kmuftp-creater/AI-CostScale-public.git costscale
+cd costscale
+docker compose -f docker-compose.setup.yml run --rm setup
+docker compose up -d --build
+```
+
+第三行互動問你管理員帳號密碼與一把 AI 金鑰（可跳過），第四行啟動。之後開 `http://localhost:3000` 登入。限制：只有這台電腦連得到、電腦關機就不通，沒有閘道看門狗，儀表板不能直接新增上游金鑰，訂閱橋接、用量收集器、專案看板在本機模式沒有測試過。
+
+**裝在雲端主機**：最快的做法：照 **[INSTALL.md 的「快速安裝」](INSTALL.md)** 執行一支腳本，回答幾個問題就裝好。要手動安裝，照 **[INSTALL.md](INSTALL.md)** 第 1 到 8 節一節一節做，每一節都有確認步驟。
 
 第 1～8 節做完，閘道與儀表板就能用了。以下是選用元件，要用哪個再裝哪個：
 
@@ -70,11 +87,12 @@
 ```
 docker-compose.yml        閘道＋資料庫＋儀表板
 docker-compose.vps.yml    正式機覆寫檔（埠位、憑證掛載）
+docker-compose.setup.yml  本機安裝模式的設定工具（只需要 Docker）
 litellm-config.yaml       閘道的模型與供應商設定
 .env.example              所有設定項目與說明
 dashboard/                儀表板（Next.js）
 db/init/                  資料表，第一次啟動時自動建立
-scripts/                  主機上的排程腳本、發金鑰
+scripts/                  主機上的排程腳本、發金鑰；local-setup.py 與 local-scheduler.py 是本機安裝模式用的
 collector/                訂閱用量收集器：複製到任何一台 Windows 電腦，雙擊安裝
 deploy/                   nginx 設定片段與主機設定腳本
 bridge/                   訂閱橋接（Windows）
