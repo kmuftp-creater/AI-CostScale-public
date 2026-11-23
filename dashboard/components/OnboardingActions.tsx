@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ONBOARDING_COOKIE } from "@/lib/onboarding-core";
 
 /**
  * 上手清單的三顆互動按鈕：收起、展開、複製指令。
  * 「收起」只記在這個瀏覽器的 cookie，不寫資料庫——換瀏覽器會再看到清單，這是刻意的。
  */
-export const ONBOARDING_COOKIE = "cs_onboarding_hidden";
 
 function setHidden(hidden: boolean) {
   const base = `${ONBOARDING_COOKIE}=${hidden ? "1" : ""}; path=/; SameSite=Lax`;

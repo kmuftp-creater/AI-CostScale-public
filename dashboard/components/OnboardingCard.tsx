@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { getOnboarding } from "@/lib/onboarding";
-import type { OnboardingStep } from "@/lib/onboarding-core";
-import { ONBOARDING_COOKIE, OnboardingCopy, OnboardingToggle } from "@/components/OnboardingActions";
+import { ONBOARDING_COOKIE, type OnboardingStep } from "@/lib/onboarding-core";
+import { OnboardingCopy, OnboardingToggle } from "@/components/OnboardingActions";
 
 /**
  * 總覽頁最上方的「上手清單」。伺服器元件：每次開頁都現場查狀態，不存任何進度。

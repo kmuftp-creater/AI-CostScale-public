@@ -54,6 +54,8 @@ export type OnboardingResult = {
   optional: OptionalItem[];
 };
 
+/** 「先收起」記在 cookie 的名字。伺服器元件與用戶端元件共用，所以放在不含 "use client" 的這支。 */
+export const ONBOARDING_COOKIE = "cs_onboarding_hidden";
 export const FALLBACK_MODEL = "gemini-flash-free";
 /** 匯率最新一筆的寫入時間在幾小時內，才算排程有在跑。排程每天抓一次，多留 2 小時給延遲。 */
 export const FX_FRESH_HOURS = 26;
