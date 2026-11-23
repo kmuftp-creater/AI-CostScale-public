@@ -325,13 +325,29 @@ check_environment() {
 
 # ────────────────────────────── 第 2 步：問答 ──────────────────────────────
 
-# ask <變數名> <環境變數名> <說明> <必填 1|0> <祕密 1|0>
+chk_domain() { valid_domain "$(norm_domain "$1")"; }
+chk_emails() {
+  local list e
+  list=$(printf '%s' "$1" | tr -d '[:space:]')
+  [ -n "$list" ] || return 1
+  IFS=',' read -r -a _chk_mails <<<"$list"
+  for e in "${_chk_mails[@]}"; do
+    [[ "$e" =~ ^[^@,]+@[^@,]+\.[^@,]+$ ]] || return 1
+  done
+}
+chk_email() { [[ "$1" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; }
+
+# ask <變數名> <環境變數名> <說明> <必填 1|0> <祕密 1|0> <檢查函式> <格式說明>
+# 互動模式格式不對會請你重填；非互動模式格式不對直接報錯結束。
 ask() {
-  local var="$1" envname="$2" desc="$3" required="$4" secret="${5:-0}" ans=""
+  local var="$1" envname="$2" desc="$3" required="$4" secret="${5:-0}" chk="${6:-}" fmt="${7:-}" ans=""
   if [ "$NON_INTERACTIVE" -eq 1 ]; then
     ans="${!envname:-}"
     if [ -z "$ans" ] && [ "$required" -eq 1 ]; then
       die "非互動模式缺少環境變數 ${envname}（${desc}）" "不需要看紀錄；用 --help 看全部環境變數"
+    fi
+    if [ -n "$ans" ] && [ -n "$chk" ] && ! "$chk" "$ans"; then
+      die "環境變數 ${envname} 的格式不對：${fmt}" "不需要看紀錄"
     fi
   else
     say ""
@@ -348,6 +364,10 @@ ask() {
       fi
       if [ -z "$ans" ] && [ "$required" -eq 1 ]; then
         echo "  這一題一定要填。"
+        continue
+      fi
+      if [ -n "$ans" ] && [ -n "$chk" ] && ! "$chk" "$ans"; then
+        echo "  格式不對：${fmt}。請再輸入一次。"
         continue
       fi
       break
@@ -376,7 +396,7 @@ collect_answers() {
   fi
 
   if is_unset "$cur_url"; then
-    ask DASH_DOMAIN CS_DASH_DOMAIN "儀表板的網域（例如 cost.example.com）。要先在 DNS 服務商建一筆 A 紀錄指向這台主機。" 1
+    ask DASH_DOMAIN CS_DASH_DOMAIN "儀表板的網域（例如 cost.example.com）。要先在 DNS 服務商建一筆 A 紀錄指向這台主機。" 1 0 chk_domain "要像 cost.example.com，不含 https:// 與斜線"
     DASH_DOMAIN=$(norm_domain "$DASH_DOMAIN")
   else
     DASH_DOMAIN=$(norm_domain "$cur_url")
@@ -385,7 +405,7 @@ collect_answers() {
   valid_domain "$DASH_DOMAIN" || die "儀表板網域格式不對：$DASH_DOMAIN（要像 cost.example.com，不含 https:// 與斜線）" "不需要看紀錄"
 
   if is_unset "$cur_gw"; then
-    ask GW_DOMAIN CS_GW_DOMAIN "閘道的網域（例如 llm.example.com）。要與儀表板網域不同，DNS 也要指向這台主機。" 1
+    ask GW_DOMAIN CS_GW_DOMAIN "閘道的網域（例如 llm.example.com）。要與儀表板網域不同，DNS 也要指向這台主機。" 1 0 chk_domain "要像 llm.example.com，不含 https:// 與斜線"
     GW_DOMAIN=$(norm_domain "$GW_DOMAIN")
   else
     GW_DOMAIN=$(norm_domain "$cur_gw")
@@ -395,13 +415,8 @@ collect_answers() {
   [ "$DASH_DOMAIN" != "$GW_DOMAIN" ] || die "儀表板與閘道要用兩個不同的網域，現在兩個都是 $DASH_DOMAIN" "不需要看紀錄"
 
   if is_unset "$cur_mail"; then
-    ask ALLOWED_EMAILS CS_ALLOWED_EMAILS "可以登入儀表板的 Google 帳號，多個用逗號分隔（例如 me@gmail.com,boss@gmail.com）。只有這些帳號登得進去。" 1
+    ask ALLOWED_EMAILS CS_ALLOWED_EMAILS "可以登入儀表板的 Google 帳號，多個用逗號分隔（例如 me@gmail.com,boss@gmail.com）。只有這些帳號登得進去。" 1 0 chk_emails "要像 me@gmail.com，多個用逗號分隔"
     ALLOWED_EMAILS=$(printf '%s' "$ALLOWED_EMAILS" | tr -d '[:space:]')
-    local e
-    IFS=',' read -r -a _mails <<<"$ALLOWED_EMAILS"
-    for e in "${_mails[@]}"; do
-      [[ "$e" =~ ^[^@,]+@[^@,]+\.[^@,]+$ ]] || die "帳號格式不對：$e（要像 me@gmail.com）" "不需要看紀錄"
-    done
   else
     ALLOWED_EMAILS="$cur_mail"
     say "  沿用 .env 的登入白名單"
@@ -435,8 +450,7 @@ collect_answers() {
   fi
 
   if [ "$TLS_MODE" = "letsencrypt" ] && [ ! -e "/etc/letsencrypt/live/${DASH_DOMAIN}/fullchain.pem" ]; then
-    ask LE_EMAIL CS_LE_EMAIL "Let's Encrypt 憑證要用的信箱（憑證快到期、帳號有事時它會寄信通知）。繼續即代表同意 Let's Encrypt 使用條款。" 1
-    [[ "$LE_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "信箱格式不對：$LE_EMAIL" "不需要看紀錄"
+    ask LE_EMAIL CS_LE_EMAIL "Let's Encrypt 憑證要用的信箱（憑證快到期、帳號有事時它會寄信通知）。繼續即代表同意 Let's Encrypt 使用條款。" 1 0 chk_email "要像 me@gmail.com"
   fi
   say "  問答完成。接下來不用再回答，可以等它跑完（首次約 5 到 10 分鐘）。"
 }
