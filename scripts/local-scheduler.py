@@ -12,6 +12,10 @@
 
 時程：容器啟動後 10 秒第一次抓匯率，120 秒（等儀表板起來）第一次檢查預算，之後各自每小時一次。
 某一次失敗（網路不通、儀表板還沒好）時 5 分鐘後重試，不必等一小時。
+到期判斷用「牆上時間」（time.time）：電腦睡眠期間 Linux 的單調時鐘（time.monotonic）不前進，
+用它排程的話，睡眠多久就會多等多久；改用牆上時間後，醒來時發現已經過了到期時間，會立刻補跑一次
+（睡了很多小時也只補跑一次，不會連跑好幾次）。牆上時間被往回調（例如校時）時，不會因此停擺很久：
+到期時間比「現在加一個間隔」還晚時，重新排成現在加一個間隔。
 每次執行都印一行結果到容器 log：  docker compose logs scheduler
 
 環境變數（由 docker-compose.yml 的 scheduler 服務提供）：
@@ -92,22 +96,33 @@ def run_budget():
     return code == 200
 
 
+def tick(jobs, now_fn=time.time):
+    """執行已到期的排程一次，並排下一次。now_fn 回傳牆上時間（秒）。回傳這次執行了幾支。"""
+    ran = 0
+    now = now_fn()
+    for j in jobs.values():
+        # 牆上時間被往回調：到期時間比「現在加一個間隔」還晚，不可能是正常排出來的，重新排。
+        if j["due"] > now + max(INTERVAL, RETRY):
+            j["due"] = now + INTERVAL
+        if now >= j["due"]:
+            try:
+                ok = j["fn"]()
+            except Exception as e:  # 單一排程出錯不能讓整個容器結束
+                log("排程", False, scrub("未預期的錯誤：%s" % e))
+                ok = False
+            ran += 1
+            j["due"] = now_fn() + (INTERVAL if ok else RETRY)
+    return ran
+
+
 def main():
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)
-    start = time.monotonic()
+    start = time.time()
     jobs = {"fx": {"fn": run_fx, "due": start + FX_FIRST}, "budget": {"fn": run_budget, "due": start + BUDGET_FIRST}}
     print("排程容器啟動：匯率與訂閱入帳、預算檢查各每 %d 秒一次（失敗 %d 秒後重試）。" % (INTERVAL, RETRY), flush=True)
     while not _stop:
-        now = time.monotonic()
-        for j in jobs.values():
-            if now >= j["due"]:
-                try:
-                    ok = j["fn"]()
-                except Exception as e:  # 單一排程出錯不能讓整個容器結束
-                    log("排程", False, scrub("未預期的錯誤：%s" % e))
-                    ok = False
-                j["due"] = time.monotonic() + (INTERVAL if ok else RETRY)
+        tick(jobs)
         for _ in range(5):
             if _stop:
                 break

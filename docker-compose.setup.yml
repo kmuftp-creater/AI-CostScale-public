@@ -32,6 +32,8 @@ services:
       - CS_DASH_PORT
       - CS_GATEWAY_PORT
       - CS_DB_PORT
+      - CS_REMOVE_KEY
+      - CS_SUBNET
       - PYTHONDONTWRITEBYTECODE=1
     network_mode: none
     stdin_open: true

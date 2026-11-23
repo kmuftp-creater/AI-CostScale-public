@@ -161,7 +161,8 @@ services:
   # 本機安裝模式專用的排程容器（profile "local"，雲端主機不會啟動它）。
   # 取代主機上的 cron，只做不需要操作 Docker 的兩支：匯率與訂閱入帳（每小時）、預算檢查（每小時）。
   # **不掛 docker socket。** 套用上游金鑰佇列與閘道看門狗要操作 Docker，本機模式不提供。
-  # 啟動時要 pip 安裝 psycopg（跟 scripts/run-fx-fetch.sh 一樣），需要連得上外網。
+  # 啟動時要 pip 安裝 psycopg（跟 scripts/run-fx-fetch.sh 一樣），需要連得上外網。版本固定為 3.3.9（2026-11-23 在本機實測可用的版本），
+  # 不跟著 PyPI 最新版走；要升級時改這個版本號，並重跑 scripts/fetch-fx.py 確認。
   # 進入點用 python（不是 shell 腳本），所以 Windows 的 CRLF 換行不會弄壞它。
   scheduler:
     image: python:3.12-slim
@@ -181,7 +182,7 @@ services:
     command:
       - sh
       - -c
-      - "until pip install --quiet --no-cache-dir 'psycopg[binary]'; do echo '安裝 psycopg 失敗（網路不通？），15 秒後重試'; sleep 15; done; exec python -u /scripts/local-scheduler.py"
+      - "until pip install --quiet --no-cache-dir 'psycopg[binary]==3.3.9'; do echo '安裝 psycopg 失敗（網路不通？），15 秒後重試'; sleep 15; done; exec python -u /scripts/local-scheduler.py"
     profiles: ["local"]
 
 volumes:

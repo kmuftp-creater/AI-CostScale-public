@@ -8,20 +8,23 @@
 
 做的事：
     1. 還沒有 .env：問管理員帳號、密碼、一把 AI 金鑰（可跳過），產生 .env（亂數祕密自動產生）。
-    2. 已經有 .env：不覆蓋。互動時給選單（補欄位、新增 AI 金鑰、改帳號或密碼、改埠），
+    2. 已經有 .env：不覆蓋。互動時給選單（補欄位、新增或移除 AI 金鑰、改帳號或密碼、改埠、換網段），
        非互動時只補缺少的欄位，另外依 CS_ACTION 做指定的動作。
-    3. 把每把金鑰的尾 4 碼寫進 spool/upstream-keys/_tails.json，儀表板的上手清單與金鑰管理頁靠它判斷
+    3. 把每把「供應商金鑰」的尾 4 碼寫進 spool/upstream-keys/_tails.json，儀表板的上手清單與金鑰管理頁靠它判斷
        「金鑰有沒有填」（雲端主機版是 scripts/apply-upstream-key.py 寫的，本機模式沒有那支排程）。
+       只收供應商金鑰；閘道主金鑰與訂閱橋接 token 不寫進去。
 
 非互動（環境變數，缺必要值會報錯結束）：
-    CS_ACTION           init（預設）| add-key | password | ports
+    CS_ACTION           init（預設）| add-key | remove-key | password | ports | subnet
     CS_ADMIN_USER       管理員帳號，省略時沿用 .env 現有的，沒有就是 admin
     CS_ADMIN_PASSWORD   管理員密碼（至少 10 個字元）。init 在 .env 還沒有可用帳密時必填；password 必填
     CS_GEMINI_FREE_KEY  Gemini 免費金鑰（填進第一個還是空的 GEMINI_FREE_KEY_n）
     CS_GROQ_KEY         Groq 金鑰（GROQ_KEY_n）
     CS_OPENROUTER_KEY   OpenRouter 金鑰（OPENROUTER_API_KEY）
     CS_GEMINI_PAID_KEY  Gemini 付費金鑰（GEMINI_PAID_KEY）
+    CS_REMOVE_KEY       要移除的金鑰欄位名（例如 GEMINI_FREE_KEY_2），remove-key 用；移除＝把那一欄改回 placeholder
     CS_DASH_PORT、CS_GATEWAY_PORT、CS_DB_PORT   儀表板、閘道、資料庫在這台電腦上的埠（預設 3000、4000、5442）
+    CS_SUBNET           subnet 動作要用的 Docker 網段（例如 10.97.45.0/24，要是私有網段的 /24）；沒給就隨機挑一個
 
 密碼與金鑰不會印到畫面，.env 只存密碼的 scrypt 雜湊。
 雜湊算法與 scripts/set-admin-password.sh 相同（N=16384、r=8、p=1、32 位元組、16 位元組亂數 salt），
@@ -31,6 +34,7 @@
 """
 import getpass
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -65,7 +69,17 @@ PROVIDERS = [
 
 RANDOM_FIELDS = ["DB_PASSWORD", "AUTH_SECRET", "ALERT_CRON_TOKEN", "OTEL_INGEST_TOKEN", "BRIDGE_TOKEN"]
 
+# 本機模式的 Docker 網段：建立 .env 時隨機挑一個私有 /24，降低撞到這台電腦上別的 Docker 網路的機率
+# （固定網段撞到時，要到 docker compose up 失敗才發現，見驗收 L-01）。
+# 避開 Docker 自己常用的 172.16 到 172.31、家用路由器常見的 192.168.0 與 192.168.1、10.0.0，
+# 以及雲端主機版固定使用的 10.87.213（訂閱橋接靠它，本機模式用不到橋接，所以不沿用）。
+# 隨機挑的範圍是 10.64.x.y 到 10.254.x.y 的 /24，不使用 192.168 與 172 區段。
+SUBNET_RESERVED = [ipaddress.ip_network(n) for n in ("10.0.0.0/24", "10.87.213.0/24", "192.168.0.0/24", "192.168.1.0/24", "172.16.0.0/12")]
+
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get("CS_NONINTERACTIVE") != "1"
+
+# 非互動模式下被要求「問使用者」時附上的提示。Git Bash 這類終端機沒有 TTY，docker 會把設定工具當成非互動執行。
+NON_TTY_HINT = "如果你是要邊問邊答，請改在 PowerShell 或終端機（不是 Git Bash）執行 docker compose -f docker-compose.setup.yml run --rm setup。"
 
 
 class Fail(Exception):
@@ -236,12 +250,29 @@ def save_env(env):
 
 # ───────────────────────── 尾碼表（給儀表板看的）─────────────────────────
 
+# 儀表板容器的執行身分（dashboard/Dockerfile：nextjs，uid／gid 1001）。尾碼表只給它讀。
+DASHBOARD_GID = 1001
+# 不寫進尾碼表的憑證：訂閱橋接 token 不是供應商金鑰。（閘道主金鑰本來就不是 api_key 欄位，不會被收。）
+TAILS_EXCLUDE = {"BRIDGE_TOKEN", "LITELLM_MASTER_KEY"}
+
+
+def tail_names(config_text):
+    """設定檔裡當成 api_key 使用的環境變數名（供應商金鑰），排除橋接 token 與主金鑰。"""
+    names = set(re.findall(r"^\s*api_key:\s*os\.environ/([A-Z][A-Z0-9_]*)", config_text, flags=re.M))
+    return names - TAILS_EXCLUDE
+
+
 def write_tails(env):
-    """寫 spool/upstream-keys/_tails.json：設定檔引用到的每個環境變數的「尾 4 碼」。格式與 apply-upstream-key.py 相同。"""
+    """寫 spool/upstream-keys/_tails.json：每把供應商金鑰的「尾 4 碼」。格式與 apply-upstream-key.py 相同。
+
+    只收設定檔裡 api_key 引用的供應商金鑰；LITELLM_MASTER_KEY、BRIDGE_TOKEN 不收（驗收 L-05）。
+    檔案權限 640：擁有者（專案資料夾的擁有者）可讀寫，群組設為儀表板容器的 gid（1001）可讀，其他人不能讀。
+    改群組失敗（例如檔案系統不支援）時退回 644，確保儀表板讀得到。
+    """
     names = set()
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
-            names = set(re.findall(r"os\.environ/([A-Z][A-Z0-9_]*)", f.read()))
+            names = tail_names(f.read())
     except OSError:
         pass
     pairs = env.pairs()
@@ -254,14 +285,22 @@ def write_tails(env):
         except OSError:
             pass
     p = os.path.join(SPOOL_DIR, "_tails.json")
-    atomic_write(p, json.dumps({"tails": tails, "at": datetime.now().astimezone().isoformat()}), 0o644)
+    atomic_write(p, json.dumps({"tails": tails, "at": datetime.now().astimezone().isoformat()}), 0o640)
+    own = owner_of_work()
+    try:
+        os.chown(p, own[0] if own else -1, DASHBOARD_GID)
+    except (OSError, AttributeError):
+        try:
+            os.chmod(p, 0o644)
+        except OSError:
+            pass
 
 
 # ───────────────────────── 問答 ─────────────────────────
 
 def ask(prompt, default=""):
     if not INTERACTIVE:
-        raise Fail("目前不是互動模式，沒辦法問「%s」。請改用環境變數提供。" % prompt)
+        raise Fail("目前不是互動模式，沒辦法問「%s」。請改用環境變數提供。%s" % (prompt, NON_TTY_HINT))
     try:
         v = input(prompt).strip()
     except EOFError:
@@ -271,7 +310,7 @@ def ask(prompt, default=""):
 
 def ask_secret(prompt):
     if not INTERACTIVE:
-        raise Fail("目前不是互動模式，沒辦法問「%s」。請改用環境變數提供。" % prompt)
+        raise Fail("目前不是互動模式，沒辦法問「%s」。請改用環境變數提供。%s" % (prompt, NON_TTY_HINT))
     try:
         return getpass.getpass(prompt)
     except EOFError:
@@ -307,7 +346,7 @@ def get_admin_password(from_env_pw, label="管理員密碼"):
             raise Fail(why + "。")
         return from_env_pw
     if not INTERACTIVE:
-        raise Fail("缺少 CS_ADMIN_PASSWORD：非互動模式一定要提供%s（至少 %d 個字元）。" % (label, ADMIN_MIN_PASSWORD))
+        raise Fail("缺少 CS_ADMIN_PASSWORD：非互動模式一定要提供%s（至少 %d 個字元）。%s" % (label, ADMIN_MIN_PASSWORD, NON_TTY_HINT))
     while True:
         pw = ask_secret("%s（至少 %d 個字元，輸入時畫面不會顯示）：" % (label, ADMIN_MIN_PASSWORD))
         why = password_problem(pw)
@@ -325,6 +364,39 @@ def valid_port(text):
         return None
     n = int(text)
     return n if 1024 <= n <= 65535 else None
+
+
+def subnet_problem(net):
+    """網段落在已知會出問題的範圍時回傳原因，否則 None。"""
+    for r in SUBNET_RESERVED:
+        if net.overlaps(r):
+            return "%s 與常見會撞到的網段 %s 重疊" % (net, r)
+    return None
+
+
+def valid_subnet(text):
+    """檢查使用者給的網段：要是私有位址的 /24，且不在已知會撞的範圍。合格回傳 (網段, 閘道)；不合格丟 Fail。"""
+    try:
+        net = ipaddress.ip_network(str(text).strip(), strict=True)
+    except ValueError:
+        raise Fail("網段格式不對：%s。要寫成像 10.97.45.0/24 這樣（最後一段是 0，後面接 /24）。" % text)
+    if net.version != 4 or net.prefixlen != 24 or not net.is_private:
+        raise Fail("網段要是私有位址的 /24（例如 10.97.45.0/24），現在是 %s。" % text)
+    why = subnet_problem(net)
+    if why:
+        raise Fail(why + "。請換一個，例如 10.97.45.0/24。")
+    return str(net), str(net.network_address + 1)
+
+
+def pick_subnet(rng=None, avoid=()):
+    """隨機挑一個私有 /24（10.64 到 10.254 區段），避開已知會撞的範圍與 avoid 內的網段。回傳 (網段, 閘道)。"""
+    rng = rng or secrets.SystemRandom()
+    for _ in range(2000):
+        net = ipaddress.ip_network("10.%d.%d.0/24" % (rng.randint(64, 254), rng.randint(1, 254)))
+        if subnet_problem(net) or str(net) in avoid:
+            continue
+        return str(net), str(net.network_address + 1)
+    raise Fail("挑不出可用的網段。請用 CS_SUBNET 指定一個，例如 CS_SUBNET=10.97.45.0/24。")
 
 
 def collect_ports(env, interactive_ask):
@@ -368,14 +440,18 @@ LOCAL_SECTION_HEADER = [
     "# COSTSCALE_MODE=local：儀表板知道自己裝在自己電腦上（金鑰管理頁的說明、上手清單的文字會跟著變）。",
     "# COMPOSE_PROFILES：讓 docker compose up -d 直接啟動儀表板與排程容器，不必再加 --profile。",
     "# DASH_PORT、GATEWAY_PORT、DB_PORT：這台電腦上的埠，被別的程式佔用時改這裡，再執行 docker compose up -d。",
+    "# COSTSCALE_SUBNET、COSTSCALE_GATEWAY：Docker 網路的網段（建立 .env 時隨機挑的私有 /24）。撞到別的網路時，",
+    "# 重新執行設定工具選「換一個網段」，再執行 docker compose down、docker compose up -d。",
     "# 埠一律只綁 127.0.0.1（只有這台電腦連得到）。要給別台電腦用，請改用雲端主機安裝（INSTALL.md「快速安裝」）。",
 ]
 
 
-def set_local_fields(env, ports, report, only_missing):
-    """寫入本機模式專用欄位。only_missing 為真時，已有的欄位不動。"""
+def set_local_fields(env, ports, report, only_missing, subnet=None):
+    """寫入本機模式專用欄位。only_missing 為真時，已有的欄位不動。subnet 是 (網段, 閘道)，只有建立新 .env 時才傳。"""
     wanted = [("COSTSCALE_MODE", "local"), ("COMPOSE_PROFILES", "full,local")]
     wanted += [(k, str(v)) for k, v in ports.items()]
+    if subnet is not None:
+        wanted += [("COSTSCALE_SUBNET", subnet[0]), ("COSTSCALE_GATEWAY", subnet[1])]
     wrote_header = False
     for k, v in wanted:
         if env.has(k):
@@ -487,8 +563,9 @@ def action_init(env, is_new):
         password = get_admin_password(pw_env)
         put_admin(env, user, password, report)
         del password
-        set_local_fields(env, ports, [], only_missing=False)
-        report.append("本機模式欄位已寫入（COSTSCALE_MODE=local，儀表板埠 %d、閘道埠 %d、資料庫埠 %d）" % (ports["DASH_PORT"], ports["GATEWAY_PORT"], ports["DB_PORT"]))
+        subnet = pick_subnet()
+        set_local_fields(env, ports, [], only_missing=False, subnet=subnet)
+        report.append("本機模式欄位已寫入（COSTSCALE_MODE=local，儀表板埠 %d、閘道埠 %d、資料庫埠 %d，Docker 網段 %s）" % (ports["DASH_PORT"], ports["GATEWAY_PORT"], ports["DB_PORT"], subnet[0]))
         keys_added = keys_from_environment(env, report)
         if INTERACTIVE and keys_added == 0:
             say("")
@@ -596,6 +673,102 @@ def action_add_key(env):
     return env, env.changed
 
 
+def filled_slots(env):
+    """目前有真金鑰的欄位：[(供應商標籤, 欄位名)]。"""
+    out = []
+    for p in PROVIDERS:
+        for slot in p[2]:
+            if env.has(slot) and not secret_unset(env.get(slot)):
+                out.append((p[1], slot))
+    return out
+
+
+def action_remove_key(env):
+    """移除一把金鑰：把那一欄改回 placeholder（範本的原樣）。金鑰值會從 .env 消失，不留備份。"""
+    report = []
+    target = take_env("CS_REMOVE_KEY")
+    slots = filled_slots(env)
+    if target is not None:
+        target = target.strip()
+        valid = [name for _, name in slots]
+        all_slots = [name for p in PROVIDERS for name in p[2]]
+        if target not in all_slots:
+            raise Fail("CS_REMOVE_KEY 要是金鑰欄位名，例如 GEMINI_FREE_KEY_2。可用的欄位名：%s。" % "、".join(all_slots))
+        if target not in valid:
+            raise Fail("%s 目前沒有金鑰（已經是 placeholder 或空的），不需要移除。" % target)
+        choice = [target]
+    elif not INTERACTIVE:
+        raise Fail("沒有指定要移除哪一欄。非互動模式請設定 CS_REMOVE_KEY，例如 CS_REMOVE_KEY=GEMINI_FREE_KEY_2。")
+    elif not slots:
+        say("目前沒有任何已填的 AI 金鑰，沒有可以移除的。")
+        return env, False
+    else:
+        choice = []
+        say("")
+        say("要移除哪一把 AI 金鑰？（只會把那一欄改回 placeholder，其他金鑰不動）")
+        for i, (label, name) in enumerate(slots, 1):
+            say("  %d) %s　%s" % (i, label, name))
+        say("  q) 結束")
+        while True:
+            c = ask("請輸入選項：").lower()
+            if c in ("q", ""):
+                break
+            if not c.isdigit() or not (1 <= int(c) <= len(slots)):
+                say("  請輸入 1 到 %d，或 q。" % len(slots))
+                continue
+            choice = [slots[int(c) - 1][1]]
+            break
+    for name in choice:
+        env.set(name, "placeholder")
+        report.append("%s 已移除（改回 placeholder）" % name)
+    if env.changed:
+        save_env(env)
+    write_tails(env)
+    say("")
+    for r in report:
+        say("  - " + r)
+    if env.changed:
+        say("")
+        say("在專案資料夾執行下面這一行讓閘道重建、不再使用這把金鑰：")
+        say("  docker compose up -d")
+        say("要讓那把金鑰真正作廢，還要到供應商的後台（例如 Google AI Studio）把它停用或刪除，這個工具做不到。")
+    else:
+        say("沒有移除任何金鑰，.env 沒有更動。")
+    return env, env.changed
+
+
+def action_subnet(env):
+    """換一個 Docker 網段（撞到別的 Docker 網路、docker compose up 報 Pool overlaps 時用）。"""
+    report = []
+    want = os.environ.get("CS_SUBNET", "").strip()
+    old = env.get("COSTSCALE_SUBNET") or "10.87.213.0/24（預設）"
+    if want:
+        net, gw = valid_subnet(want)
+    elif INTERACTIVE:
+        net, gw = pick_subnet(avoid=(env.get("COSTSCALE_SUBNET"),))
+        say("")
+        say("新的網段是 %s（閘道 %s），是隨機挑的私有網段。" % (net, gw))
+        ans = ask("要換成這個網段嗎？按 Enter 確定，輸入 n 取消：").lower()
+        if ans in ("n", "no"):
+            say("沒有更動。")
+            return env, False
+    else:
+        net, gw = pick_subnet(avoid=(env.get("COSTSCALE_SUBNET"),))
+    env.set("COSTSCALE_SUBNET", net)
+    env.set("COSTSCALE_GATEWAY", gw)
+    report.append("Docker 網段：%s 改為 %s（閘道 %s）" % (old, net, gw))
+    if env.changed:
+        save_env(env)
+    write_tails(env)
+    for r in report:
+        say("  - " + r)
+    say("")
+    say("在專案資料夾執行下面兩行讓新網段生效（down 不加 -v，資料庫的資料與設定都會保留）：")
+    say("  docker compose down")
+    say("  docker compose up -d")
+    return env, env.changed
+
+
 def action_password(env):
     report = []
     pw_env = take_env("CS_ADMIN_PASSWORD")
@@ -646,8 +819,10 @@ def menu():
     say("已有 .env。要做什麼？")
     say("  1) 檢查並補齊缺少的欄位（不會改任何已有的值）")
     say("  2) 新增 AI 金鑰")
-    say("  3) 更改管理員帳號或密碼")
-    say("  4) 更改埠號（3000、4000、5442 被別的程式佔用時）")
+    say("  3) 移除 AI 金鑰")
+    say("  4) 更改管理員帳號或密碼")
+    say("  5) 更改埠號（3000、4000、5442 被別的程式佔用時）")
+    say("  6) 換一個網段（docker compose up 報 Pool overlaps、網段重疊時）")
     say("  q) 離開")
     while True:
         c = ask("請輸入選項：").lower()
@@ -656,19 +831,27 @@ def menu():
         if c == "2":
             return "add-key"
         if c == "3":
-            return "password"
+            return "remove-key"
         if c == "4":
+            return "password"
+        if c == "5":
             return "ports"
+        if c == "6":
+            return "subnet"
         if c in ("q", ""):
             return "quit"
-        say("  請輸入 1 到 4，或 q。")
+        say("  請輸入 1 到 6，或 q。")
 
 
 def finish_message(ports_env, is_new):
     ports = {k: valid_port(ports_env.get(k)) or DEFAULT_PORTS[k] for k in DEFAULT_PORTS}
     say("")
-    say("設定完成。下一步，在專案資料夾執行這一行啟動（第一次要下載映像並建置儀表板，約 3 到 10 分鐘）：")
-    say("  docker compose up -d --build")
+    if is_new:
+        say("設定完成。下一步，在專案資料夾執行這一行啟動（第一次要下載映像並建置儀表板，約 3 到 10 分鐘）：")
+        say("  docker compose up -d --build")
+    else:
+        say("設定檢查完成。要讓 .env 的更動生效，在專案資料夾執行這一行（已經建置過的話，幾秒到一分鐘就好）：")
+        say("  docker compose up -d")
     say("啟動後開 http://localhost:%d ，用剛才設定的管理員帳號登入。" % ports["DASH_PORT"])
     say("閘道網址是 http://localhost:%d（只有這台電腦上的程式連得到）。" % ports["GATEWAY_PORT"])
 
@@ -684,8 +867,8 @@ def main(argv):
         raise Fail("沒有專案資料夾的寫入權限，無法建立 .env。")
 
     action = os.environ.get("CS_ACTION", "").strip().lower()
-    if action not in ("", "init", "add-key", "password", "ports"):
-        raise Fail("CS_ACTION 只能是 init、add-key、password、ports（現在是 %s）。" % action)
+    if action not in ("", "init", "add-key", "remove-key", "password", "ports", "subnet"):
+        raise Fail("CS_ACTION 只能是 init、add-key、remove-key、password、ports、subnet（現在是 %s）。" % action)
 
     has_env = os.path.isfile(ENV_PATH)
     if not has_env:
@@ -707,6 +890,10 @@ def main(argv):
             say("注意：這份 .env 沒有 COSTSCALE_MODE=local，看起來不是本機模式產生的。")
     elif action == "add-key":
         env, changed = action_add_key(env)
+    elif action == "remove-key":
+        env, changed = action_remove_key(env)
+    elif action == "subnet":
+        env, changed = action_subnet(env)
     elif action == "password":
         env, changed = action_password(env)
     elif action == "ports":
