@@ -205,7 +205,7 @@ AI CostScale 互動式安裝腳本
         不問問題，全部答案改由環境變數提供：
           CS_DASH_DOMAIN       儀表板網域，例如 cost.example.com
           CS_GW_DOMAIN         閘道網域，例如 llm.example.com
-          CS_ADMIN_USER        管理員帳號（英數與 . _ -，3 到 32 字元；省略時用 admin）
+          CS_ADMIN_USER        管理員帳號（英數開頭，其餘英數與 . _ -，3 到 32 字元；省略時用 admin）
           CS_ADMIN_PASSWORD    管理員密碼（至少 10 個字元）。有給就設定帳號密碼登入
           CS_ALLOWED_EMAILS    可登入的 Google 帳號，逗號分隔（有設 Google 登入才需要）
           CS_GOOGLE_ID         Google OAuth 用戶端 ID（要用 Google 登入才給）
@@ -216,6 +216,7 @@ AI CostScale 互動式安裝腳本
           CS_LE_EMAIL          Let's Encrypt 通知信箱（letsencrypt 模式且尚未有憑證時必填）
         信箱只收英數與 . _ % + -，白名單用逗號分隔；Google ID、密鑰與 Gemini 金鑰不能含空白、引號、$、反引號；
         密碼不能含換行與控制字元，最長 256 個字元。
+        密碼放在環境變數時，裝完要 unset，也不要直接打在命令列前面（會留在 shell 歷史），先 read -rs 進變數比較安全。
         .env 已經有的欄位不需要再提供。
   -h, --help
         顯示這段說明。
@@ -260,7 +261,7 @@ is_unset() {
   return 1
 }
 
-# 登入白名單是否「還沒填」：只有空或 change-me。.env.example 的預設值 you@example.com 與使用者
+# 登入白名單是否「還沒填」：只有空或 change-me。舊版 .env.example 的預設值 you@example.com 與使用者
 # 自己填的同一個字串分不出來，所以不當成未填；全新安裝時由 build_env 直接以你的答案寫入。
 mail_unset() {
   local v="${1:-}"
@@ -279,21 +280,34 @@ env_get() { # env_get KEY：沒有這個欄位回空字串
 
 env_has() { [ -f "$APP_DIR/.env" ] && grep -q "^$1=" "$APP_DIR/.env"; }
 
-env_set() { # env_set KEY VALUE：已有這個欄位就取代，沒有就附加。只用 shell 內建指令，值不會出現在 ps
-  local k="$1" v="$2" tmp line found=0
-  case "$v" in *$'\n'*) die "欄位 $k 的值含有換行，無法寫入 .env" ;; esac
-  tmp=$(mktemp)
+# 印出「換掉（或附加）一個欄位之後的 .env 內容」。只用 shell 內建指令，值不會出現在 ps
+env_render_set() { # env_render_set KEY VALUE
+  local k="$1" v="$2" line found=0
   while IFS= read -r line || [ -n "$line" ]; do
     if [[ "$line" == "$k="* ]]; then
-      printf '%s=%s\n' "$k" "$v" >>"$tmp"
+      printf '%s=%s\n' "$k" "$v" || return 1
       found=1
     else
-      printf '%s\n' "$line" >>"$tmp"
+      printf '%s\n' "$line" || return 1
     fi
   done <"$APP_DIR/.env"
-  [ "$found" -eq 1 ] || printf '%s=%s\n' "$k" "$v" >>"$tmp"
-  cat "$tmp" >"$APP_DIR/.env"
-  rm -f "$tmp"
+  if [ "$found" -ne 1 ]; then printf '%s=%s\n' "$k" "$v" || return 1; fi
+  return 0
+}
+
+# 印出「附加幾行之後的 .env 內容」
+env_render_append() { # env_render_append 行...
+  cat "$APP_DIR/.env" || return 1
+  # 原檔最後一行沒有換行時先補一個，免得新欄位接在上一行後面
+  [ -z "$(tail -c1 "$APP_DIR/.env")" ] || printf '\n' || return 1
+  printf '%s\n' "$@"
+}
+
+env_set() { # env_set KEY VALUE：已有這個欄位就取代，沒有就附加。寫到同目錄暫存檔再 mv，不會留下半份 .env
+  local k="$1" v="$2"
+  case "$v" in *$'\n'*) die "欄位 $k 的值含有換行，無法寫入 .env" ;; esac
+  admin_atomic_write "$APP_DIR/.env" env_render_set "$k" "$v" \
+    || die "寫入 $APP_DIR/.env 失敗（欄位 $k）。.env 沒有被更動，磁碟空間或權限有問題時會這樣。" "df -h $APP_DIR；ls -la $APP_DIR/.env*"
 }
 
 has_systemd() { [ -d /run/systemd/system ]; }
@@ -605,7 +619,7 @@ collect_answers() {
     if [ "$NON_INTERACTIVE" -eq 1 ]; then
       ADMIN_USER="${CS_ADMIN_USER:-admin}"
       ADMIN_PASSWORD="${CS_ADMIN_PASSWORD}"
-      admin_valid_user "$ADMIN_USER" || die "環境變數 CS_ADMIN_USER 的格式不對：只收英數與 . _ -，3 到 32 個字元" "不需要看紀錄"
+      admin_valid_user "$ADMIN_USER" || die "環境變數 CS_ADMIN_USER 的格式不對：${ADMIN_USER_RULE}" "不需要看紀錄"
       admin_valid_password "$ADMIN_PASSWORD" || die "環境變數 CS_ADMIN_PASSWORD 不合格：${ADMIN_PW_REASON}" "不需要看紀錄"
     else
       say ""
@@ -614,7 +628,7 @@ collect_answers() {
         read -r -p "  管理員帳號（直接按 Enter 用 admin）：" ADMIN_USER || die "讀不到輸入。要在沒有終端機的環境執行，請改用 --non-interactive" "不需要看紀錄"
         [ -n "$ADMIN_USER" ] || ADMIN_USER="admin"
         admin_valid_user "$ADMIN_USER" && break
-        echo "  格式不對：只收英數與 . _ -，3 到 32 個字元。請再輸入一次。"
+        echo "  格式不對：${ADMIN_USER_RULE}。請再輸入一次。"
       done
       while :; do
         read -rs -p "  管理員密碼（至少 ${ADMIN_MIN_PASSWORD} 個字元，輸入時畫面不會顯示）：" pw1 || die "讀不到輸入。要在沒有終端機的環境執行，請改用 --non-interactive" "不需要看紀錄"
@@ -632,7 +646,9 @@ collect_answers() {
         break
       done
       ADMIN_PASSWORD="$pw1"
-      say "  已收到密碼（共 ${#ADMIN_PASSWORD} 個字元，畫面不顯示內容）。"
+      # 長度只顯示在畫面，不寫進紀錄檔（紀錄檔留一行不含長度的版本）
+      echo "  已收到密碼（共 ${#ADMIN_PASSWORD} 個字元，畫面不顯示內容）。"
+      printf '%s\n' "  已收到密碼。" >>"$LOG_FILE" 2>/dev/null || true
     fi
   fi
 
@@ -781,8 +797,8 @@ build_env() {
       die "找到先前安裝留下的資料庫 volume（costscale_dbdata），但 .env 不見了。新產生的資料庫密碼對不上舊資料庫，服務會一直連不上。腳本不會刪資料庫。請把原本的 .env 放回 $APP_DIR/.env 再重新執行；確定舊資料不要了，才由你自己手動處理 volume。" "docker volume ls"
     fi
     say "  還沒有 .env：以 .env.example 為底建立"
-    cp .env.example .env
-    chmod 600 .env
+    admin_atomic_write "$APP_DIR/.env" cat "$APP_DIR/.env.example" \
+      || die "建立 $APP_DIR/.env 失敗。" "df -h $APP_DIR；ls -la $APP_DIR"
     NEW_ENV=1
     # 新建的 .env 裡，下面這些一定重新產生
     env_set DB_PASSWORD "$(rand_hex)"
@@ -796,16 +812,20 @@ build_env() {
     say "  沿用既有 .env，不覆蓋、不改已有的值"
     chmod 600 .env
     # 補上 .env.example 有、但 .env 沒有的欄位
-    local line k added=0
+    local line k added=0 missing=()
     while IFS= read -r line || [ -n "$line" ]; do
       [[ "$line" =~ ^([A-Z][A-Z0-9_]*)= ]] || continue
       k="${BASH_REMATCH[1]}"
       if ! env_has "$k"; then
-        printf '%s\n' "$line" >>.env
+        missing+=("$line")
         added=$((added + 1))
       fi
     done <.env.example
-    [ "$added" -eq 0 ] || say "  補上了 ${added} 個缺少的欄位（用範本預設值）"
+    if [ "$added" -gt 0 ]; then
+      admin_atomic_write "$APP_DIR/.env" env_render_append "${missing[@]}" \
+        || die "補上缺少的欄位時寫入 $APP_DIR/.env 失敗，.env 沒有被更動。" "df -h $APP_DIR；ls -la $APP_DIR/.env*"
+      say "  補上了 ${added} 個缺少的欄位（用範本預設值）"
+    fi
     # 亂數欄位若不存在或還是範本預設值，補一組新的；已經有真值的不動
     local kk
     for kk in DB_PASSWORD AUTH_SECRET ALERT_CRON_TOKEN OTEL_INGEST_TOKEN BRIDGE_TOKEN; do
@@ -814,6 +834,11 @@ build_env() {
         say "  $kk 原本是空的或範本預設值，已產生新值"
       fi
     done
+    # AUTH_SECRET 短於 32 個字元，儀表板會當成沒設定、拒絕所有登入，所以也換成新的
+    if auth_secret_bad "$(env_get AUTH_SECRET)"; then
+      env_set AUTH_SECRET "$(rand_hex)"
+      say "  AUTH_SECRET 短於 ${AUTH_SECRET_MIN_LENGTH} 個字元，已產生新值（原本登入中的瀏覽器需要重新登入）"
+    fi
     if is_unset "$(env_get LITELLM_MASTER_KEY)"; then
       env_set LITELLM_MASTER_KEY "sk-$(rand_hex)"
       say "  LITELLM_MASTER_KEY 原本是空的或範本預設值，已產生新值"
@@ -822,7 +847,7 @@ build_env() {
 
   env_fill AUTH_URL "https://${DASH_DOMAIN}"
   env_fill GATEWAY_PUBLIC_URL "https://${GW_DOMAIN}"
-  # 白名單：全新的 .env 一定寫入你的答案（範本預設值 you@example.com 不算你填的）；既有 .env 只補空值
+  # 白名單：全新的 .env 一定寫入你的答案（舊版範本的預設值 you@example.com 不算你填的）；既有 .env 只補空值
   if [ -n "$ALLOWED_EMAILS" ]; then
     if [ "$NEW_ENV" -eq 1 ] || ! env_has AUTH_ALLOWED_EMAILS || mail_unset "$(env_get AUTH_ALLOWED_EMAILS)"; then
       env_set AUTH_ALLOWED_EMAILS "$ALLOWED_EMAILS"
@@ -937,20 +962,41 @@ start_stack() {
 SITE_TEMPLATE=$(
   cat <<'EOF'
 # 由 scripts/install.sh 產生（TLS 模式：__MODE__）。內容對應 INSTALL.md 第 6 節。
+
+# 登入相關路徑的限速：只算 POST（登入送出），GET（開頁面、取 CSRF、查 session）不受影響。
+# 每個來源每秒 5 次、突發 10 次，超過回 429。map 與 limit_req_zone 只能寫在 http 層；
+# 這個檔案是被 nginx.conf 的 include 放進 http 區塊的，所以寫在 server 之外。
+map $request_method $costscale_login_key {
+    default "";
+    POST    $binary_remote_addr;
+}
+limit_req_zone $costscale_login_key zone=costscale_login:10m rate=5r/s;
+
 # 儀表板
 server {
     __LISTEN__
     server_name __DASH__;
 
+    # 登入表單送出（Server Action 會 POST 到 /login）。登入內容很小，body 上限壓低，超過由 nginx 直接回 413
+    location = /login {
+        limit_req zone=costscale_login burst=10 nodelay;
+        limit_req_status 429;
+        limit_req_log_level warn;
+        client_max_body_size 16k;
+        __PROXY__
+    }
+
+    # next-auth 的 API（帳密登入的 callback、登出、csrf、session）
+    location /api/auth/ {
+        limit_req zone=costscale_login burst=10 nodelay;
+        limit_req_status 429;
+        limit_req_log_level warn;
+        client_max_body_size 16k;
+        __PROXY__
+    }
+
     location / {
-        proxy_pass http://127.0.0.1:3300;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        # 覆寫（不是附加）：登入的輸錯鎖定以這個標頭最左邊的 IP 為單位，
-        # 用戶端自己帶的 X-Forwarded-For 必須丟掉，否則可以偽造 IP 繞過鎖定。
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        __PROXY__
         client_max_body_size 20m;
     }
 }
@@ -1024,7 +1070,16 @@ EOF
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_certificate ${cdir}/fullchain.pem;
     ssl_certificate_key ${cdir}/privkey.pem;"
-  out="${SITE_TEMPLATE//__LISTEN__/$listen}"
+  local proxy="proxy_pass http://127.0.0.1:3300;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        # 覆寫（不是附加）：登入的輸錯鎖定以這個標頭最左邊的 IP 為單位，
+        # 用戶端自己帶的 X-Forwarded-For 必須丟掉，否則可以偽造 IP 繞過鎖定。
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;"
+  out="${SITE_TEMPLATE//__PROXY__/$proxy}"
+  out="${out//__LISTEN__/$listen}"
   out="${out//__MODE__/$mode}"
   out="${out//__DASH__/$DASH_DOMAIN}"
   out="${out//__GW__/$GW_DOMAIN}"
@@ -1188,7 +1243,7 @@ setup_nginx() {
     # 已經申請成功過：設定檔含 ssl_certificate、網域一致、憑證在，就不要重寫
     if [ -f "$site_avail" ] && grep -q 'ssl_certificate' "$site_avail" \
        && grep -q "server_name ${DASH_DOMAIN};" "$site_avail" && grep -q "server_name ${GW_DOMAIN};" "$site_avail" \
-       && [ -e "$le_cert" ]; then
+       && [ -e "$le_cert" ] && gen_site letsencrypt | cmp -s - "$site_avail"; then
       say "  Let's Encrypt 憑證與 nginx 設定都已就緒，跳過"
       install_guard_and_snippets
       nginx -t >>"$LOG_FILE" 2>&1 || die "nginx -t 沒過。" "nginx -t"
@@ -1291,6 +1346,21 @@ env_required_ok() {
   [ -z "$bad" ] || { say "    還沒填好的欄位：$bad"; return 1; }
 }
 
+# 祕密欄位都不是範本值（空值、placeholder、change-me 開頭都算範本值），AUTH_SECRET 另外要至少 32 個字元。
+# 這些欄位留著範本值，等於把祕密公開在 repo 裡：AUTH_SECRET 的範本值可以讓任何人偽造登入，
+# 儀表板遇到這種情況會拒絕所有登入；token 類的範本值則讓任何人都能呼叫對應的 API。
+SECRET_FIELDS=(AUTH_SECRET ALERT_CRON_TOKEN OTEL_INGEST_TOKEN BRIDGE_TOKEN DB_PASSWORD LITELLM_MASTER_KEY)
+secrets_not_template() {
+  local k bad=""
+  for k in "${SECRET_FIELDS[@]}"; do
+    if secret_unset "$(env_get "$k")"; then bad="$bad $k"; fi
+  done
+  if auth_secret_bad "$(env_get AUTH_SECRET)"; then
+    case "$bad" in *" AUTH_SECRET"*) ;; *) bad="$bad AUTH_SECRET（短於 ${AUTH_SECRET_MIN_LENGTH} 個字元）" ;; esac
+  fi
+  [ -z "$bad" ] || { say "    還是範本值、空值或太短的欄位：$bad"; return 1; }
+}
+
 # 登入方式是否已設定（看 .env）
 password_configured() {
   admin_valid_user "$(env_get AUTH_ADMIN_USER)" && admin_hash_format_ok "$(env_get AUTH_ADMIN_PASSWORD_HASH)"
@@ -1303,7 +1373,7 @@ login_configured() { password_configured || google_configured; }
 login_page_enabled() {
   local body
   body=$(curl -s --max-time 10 http://127.0.0.1:3300/login) || return 1
-  [ -n "$body" ] && ! printf '%s' "$body" | grep -q '還沒有設定任何登入方式'
+  [ -n "$body" ] && ! printf '%s' "$body" | grep -q -e '還沒有設定任何登入方式' -e 'AUTH_SECRET 還沒設好'
 }
 
 final_summary() {
@@ -1335,6 +1405,11 @@ final_summary() {
     check "儀表板登入頁已啟用登入方式（不是「還沒有設定任何登入方式」）" login_page_enabled
   fi
   if env_required_ok; then check_ok ".env 必要欄位都已填好（供應商金鑰除外）"; else check_fail ".env 必要欄位都已填好"; fi
+  if secrets_not_template; then
+    check_ok "祕密欄位都不是範本值（AUTH_SECRET、ALERT_CRON_TOKEN、OTEL_INGEST_TOKEN、BRIDGE_TOKEN、DB_PASSWORD、LITELLM_MASTER_KEY），AUTH_SECRET 至少 ${AUTH_SECRET_MIN_LENGTH} 個字元"
+  else
+    check_fail "祕密欄位都不是範本值（上面列出的欄位要換成新的亂數：openssl rand -hex 32，再重建服務）"
+  fi
   check "排程區塊恰好一份" bash -c "[ \"\$(crontab -l 2>/dev/null | grep -cF '$CRON_BEGIN')\" = 1 ]"
   check "/root/vertex-sa.json 是檔案" test -f /root/vertex-sa.json
   check "spool/upstream-keys 存在且權限 700" bash -c "[ \"\$(stat -c '%a' $APP_DIR/spool/upstream-keys)\" = 700 ]"
@@ -1379,6 +1454,11 @@ final_summary() {
     for w in "${WARNINGS[@]}"; do say "  - $w"; done
   fi
 
+  if [ "$SKIP_DNS_CHECK" -eq 1 ]; then
+    say ""
+    say "提醒：你加了 --skip-dns-check。網域前面如果有 Cloudflare 或其他反向代理，nginx 要另外設定才認得到真正的來源 IP，否則所有人共用同一個輸錯鎖定；做法見 INSTALL.md 第 6 節的「前面有 Cloudflare 或其他反向代理時」。"
+  fi
+
   say ""
   say "下一步（INSTALL.md 第 8 節）："
   local n=1
@@ -1386,18 +1466,18 @@ final_summary() {
     say "  ${n}. 設定登入方式（只要做一次），兩種擇一："
     say "     甲、帳號密碼（建議，不用 Google）：在主機上執行下面這一行，依提示設定管理員帳號與密碼："
     say "        bash ${APP_DIR}/scripts/set-admin-password.sh"
-    say "        腳本最後會印出一行 docker compose 指令，照著執行讓設定生效（改完 .env 一定要用 up -d；restart 不會讀到新值）："
-    say "        ${COMPOSE_STR} up -d"
+    say "        腳本最後會印出一行 docker compose 指令（只重建儀表板），照著執行讓設定生效（改完 .env 一定要用 up -d；restart 不會讀到新值）："
+    say "        ${COMPOSE_STR} up -d dashboard"
     say "     乙、Google 登入："
     say "        a. 到 https://console.cloud.google.com/apis/credentials 建立「OAuth 用戶端 ID」（類型選「網頁應用程式」，做法見 INSTALL.md 第 4 節），"
     say "           「已授權的重新導向 URI」填 https://${DASH_DOMAIN}/api/auth/callback/google ，一個字都不要多。"
     say "        b. 用 nano ${APP_DIR}/.env 填 AUTH_GOOGLE_ID（用戶端 ID）、AUTH_GOOGLE_SECRET（用戶端密鑰），並把 AUTH_ALLOWED_EMAILS 改成你的 Google 信箱，存檔。"
-    say "        c. 在 ${APP_DIR} 執行上面那一行 ${COMPOSE_STR} up -d。"
+    say "        c. 在 ${APP_DIR} 執行：${COMPOSE_STR} up -d dashboard"
     say "     （不想等，可以先在主機上用 ${APP_DIR}/scripts/issue-key.sh test-app \"說明文字\" 發金鑰，照第 $((n + 2)) 步測試。）"
     n=$((n + 1))
   elif [ "$has_pw" -eq 1 ]; then
     say "  ${n}. 用瀏覽器開 https://${DASH_DOMAIN} ，帳號 $(env_get AUTH_ADMIN_USER)，密碼是你剛才設定的那一組。連續輸錯 5 次會鎖 15 分鐘。"
-    say "     忘記密碼或想換密碼：在主機上重跑 bash ${APP_DIR}/scripts/set-admin-password.sh，再執行 ${COMPOSE_STR} up -d。"
+    say "     忘記密碼或想換密碼：在主機上重跑 bash ${APP_DIR}/scripts/set-admin-password.sh，再執行 ${COMPOSE_STR} up -d dashboard（只重建儀表板，不會動到閘道）。"
     n=$((n + 1))
   fi
   say "  ${n}. 儀表板 →「應用程式」→「新增軟體」，取個名字，複製只顯示一次的虛擬金鑰（sk- 開頭）。"

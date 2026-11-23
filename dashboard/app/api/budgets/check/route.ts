@@ -12,6 +12,7 @@ import {
 import { monthRange, formatUsd } from "@/lib/format";
 import { taipeiDay } from "@/lib/range";
 import { sendMail, mailConfigured, alertRecipients } from "@/lib/mail";
+import { tokenUnset } from "@/lib/secret-check";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +24,9 @@ export const dynamic = "force-dynamic";
  */
 function authorize(request: NextRequest): NextResponse | null {
   const expected = process.env.ALERT_CRON_TOKEN;
-  if (!expected) {
+  if (tokenUnset(expected) || !expected) {
     return NextResponse.json(
-      { error: "伺服器未設定 ALERT_CRON_TOKEN，端點停用中" },
+      { error: "伺服器未設定 ALERT_CRON_TOKEN（空值或仍是範本值），端點停用中" },
       { status: 503 }
     );
   }

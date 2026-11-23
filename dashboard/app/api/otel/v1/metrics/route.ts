@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { insertOtelUsage } from "@/lib/db";
+import { tokenUnset } from "@/lib/secret-check";
 
 export const dynamic = "force-dynamic";
 
@@ -61,9 +62,9 @@ function bucketFor(typeAttr: string | undefined): "input" | "output" | "cache_re
  */
 function authorizeIngest(request: NextRequest): NextResponse | null {
   const expected = process.env.OTEL_INGEST_TOKEN;
-  if (!expected) {
+  if (tokenUnset(expected) || !expected) {
     return NextResponse.json(
-      { error: "伺服器未設定 OTEL_INGEST_TOKEN，遙測接收停用中" },
+      { error: "伺服器未設定 OTEL_INGEST_TOKEN（空值或仍是範本值），遙測接收停用中" },
       { status: 503 }
     );
   }

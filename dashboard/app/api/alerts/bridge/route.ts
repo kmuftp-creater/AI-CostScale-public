@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendMail } from "@/lib/mail";
+import { tokenUnset } from "@/lib/secret-check";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +28,9 @@ function safeEqual(a: string, b: string): boolean {
 
 export async function POST(request: NextRequest) {
   const expected = process.env.ALERT_CRON_TOKEN || "";
-  if (!expected) {
+  if (tokenUnset(expected)) {
     return NextResponse.json(
-      { error: "伺服器未設定 ALERT_CRON_TOKEN，端點停用中" },
+      { error: "伺服器未設定 ALERT_CRON_TOKEN（空值或仍是範本值），端點停用中" },
       { status: 503 }
     );
   }

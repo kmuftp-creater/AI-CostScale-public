@@ -2,7 +2,7 @@
  * 管理員帳號密碼登入：設定解析與驗證。
  *
  * 設定來源是 .env 的兩個欄位，兩個都有值才啟用帳密登入：
- *   AUTH_ADMIN_USER          帳號，英數與 . _ -，3 到 32 字元
+ *   AUTH_ADMIN_USER          帳號，英數開頭，其餘英數與 . _ -，3 到 32 字元
  *   AUTH_ADMIN_PASSWORD_HASH scrypt:<N>:<r>:<p>:<salt hex>:<hash hex>
  *
  * 雜湊格式刻意不含 $：docker compose 會把 .env 值裡的 $ 當變數替換。
@@ -13,11 +13,25 @@
  */
 import { scrypt, timingSafeEqual, createHash } from "node:crypto";
 
-export const ADMIN_USER_PATTERN = /^[A-Za-z0-9._-]{3,32}$/;
+export const ADMIN_USER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/;
 
 /** 輸入長度上限。超過的一律視為帳密錯誤，不進 scrypt。 */
 export const MAX_USER_INPUT = 64;
 export const MAX_PASSWORD_INPUT = 1024;
+
+/**
+ * 輸入是否在長度上限內（且兩者都是字串、密碼非空）。auth.ts 在進驗證之前先用它擋：
+ * 超過的一律當成一般的登入失敗（照樣計入失敗次數），不進 scrypt。
+ */
+export function inputWithinLimits(user: unknown, password: unknown): boolean {
+  return (
+    typeof user === "string" &&
+    typeof password === "string" &&
+    user.length <= MAX_USER_INPUT &&
+    password.length > 0 &&
+    password.length <= MAX_PASSWORD_INPUT
+  );
+}
 
 const KEY_LEN = 32;
 const HEX = /^[0-9a-f]+$/;
@@ -88,7 +102,7 @@ export function getAdminConfig(env: Record<string, string | undefined> = process
     return null;
   }
   if (!ADMIN_USER_PATTERN.test(user)) {
-    warnOnce("user", "AUTH_ADMIN_USER 格式不對（英數與 . _ -，3 到 32 字元），帳密登入停用。");
+    warnOnce("user", "AUTH_ADMIN_USER 格式不對（英數開頭，其餘英數與 . _ -，3 到 32 字元），帳密登入停用。");
     return null;
   }
   const parsed = parseHash(rawHash);
@@ -116,7 +130,7 @@ export async function verifyAdminLogin(cfg: AdminConfig, user: unknown, password
   const okType = typeof user === "string" && typeof password === "string";
   const u = okType ? (user as string) : "";
   const pw = okType ? (password as string) : "";
-  const inputOk = okType && u.length <= MAX_USER_INPUT && pw.length > 0 && pw.length <= MAX_PASSWORD_INPUT;
+  const inputOk = okType && inputWithinLimits(u, pw);
 
   const userOk = inputOk && timingSafeEqual(sha256(u), sha256(cfg.user));
   const { n, r, p } = cfg.parsed;

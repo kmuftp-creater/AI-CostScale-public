@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
+import { authSecretProblem } from "@/lib/secret-check";
 
 /**
  * Next.js 16 把 middleware.js 重新命名為 proxy.js（行為相同，只是換了檔名與
@@ -21,7 +22,9 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const session = await auth();
+  // AUTH_SECRET 沒設好（空值、範本值、太短）：不看任何 session，一律當成沒登入。
+  // auth.ts 本身也已停用所有登入並換掉簽章密鑰，這裡是第二道，不依賴 next-auth 的行為。
+  const session = authSecretProblem() !== null ? null : await auth();
   if (!session?.user) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("from", pathname);

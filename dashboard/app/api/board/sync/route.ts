@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth-guard";
 import { syncBoardGithub } from "@/lib/board-write";
+import { tokenUnset } from "@/lib/secret-check";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const cronToken = process.env.ALERT_CRON_TOKEN;
   const auth = request.headers.get("authorization") || "";
-  const viaCron = Boolean(cronToken) && auth === `Bearer ${cronToken}`;
+  const viaCron = !tokenUnset(cronToken) && auth === `Bearer ${cronToken}`;
 
   if (!viaCron) {
     const guard = await requireSession();

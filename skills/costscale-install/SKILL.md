@@ -13,7 +13,7 @@ description: 帶使用者一步一步安裝自架的 AI CostScale（LiteLLM 閘�
 
 1. 雲端主機的 SSH 位址（例：`root@203.0.113.10`），以及你（Claude Code）現在是在那台主機上，還是在使用者的電腦上透過 SSH 操作。
 2. 儀表板與閘道要用的兩個網域，DNS 是否已經指向那台主機。
-3. 可以登入儀表板的 Google 帳號。
+3. 儀表板用什麼方式登入。預設是管理員帳號密碼，不需要 Google；只有使用者明確要用 Google 登入時，才另外問可以登入的 Google 帳號（見 `INSTALL.md` 第 4 節）。管理員密碼請使用者自己在安裝腳本的提示裡輸入，不要請他貼在對話裡。
 4. 要不要裝訂閱橋接（第 9 節）、用量收集器（第 10 節）、專案看板（第 11 節）。預設只裝第 1 到第 8 節。
 
 ## 執行原則
@@ -31,8 +31,8 @@ description: 帶使用者一步一步安裝自架的 AI CostScale（LiteLLM 閘�
 | 節 | 容易出錯的地方 |
 |---|---|
 | 1 | `docker compose version` 要 v2.24.4 以上，否則覆寫檔的 `!override` 會報錯 |
-| 3 | `AUTH_URL` 結尾不要斜線；每個 token 各自產生，不要共用 |
-| 4 | OAuth 重新導向 URI 是 `<AUTH_URL>/api/auth/callback/google`，要完全一致 |
+| 3 | `AUTH_URL` 結尾不要斜線；每個 token 各自產生，不要共用；`AUTH_SECRET`、各個 token 不能留範本值（`change-me` 開頭），`AUTH_SECRET` 還至少要 32 個字元，否則儀表板會拒絕所有登入 |
+| 4（選用） | OAuth 重新導向 URI 是 `<AUTH_URL>/api/auth/callback/google`，要完全一致 |
 | 5 | `spool/upstream-keys` 要 `chown 1001`，否則「新增上游金鑰」會失敗 |
 | 7 | `apply-upstream-key.py` 的每分鐘排程一定要裝，儀表板的金鑰管理靠它 |
 | 9 | 橋接的 `BRIDGE_TOKEN` 兩邊要一模一樣；SSH 必須免密碼（`ssh -o BatchMode=yes <主機> echo ok` 要印 `ok`）；設完 Windows 環境變數要開新的 PowerShell 視窗 |

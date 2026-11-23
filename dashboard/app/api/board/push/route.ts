@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
+import { tokenUnset } from "@/lib/secret-check";
 
 export const dynamic = "force-dynamic";
 
@@ -40,8 +41,8 @@ function safeEqual(a: string, b: string): boolean {
 
 export async function POST(request: NextRequest) {
   const expected = process.env.BOARD_PUSH_TOKEN || "";
-  if (!expected) {
-    return NextResponse.json({ error: "伺服器未設定 BOARD_PUSH_TOKEN，推送通道停用" }, { status: 503 });
+  if (tokenUnset(expected)) {
+    return NextResponse.json({ error: "伺服器未設定 BOARD_PUSH_TOKEN（空值或仍是範本值），推送通道停用" }, { status: 503 });
   }
 
   let body: Record<string, unknown>;

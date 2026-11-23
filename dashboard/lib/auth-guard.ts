@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { authSecretProblem } from "@/lib/secret-check";
 
 /**
  * API 路由的共用 session 檢查。AUTH_DISABLED=1 時（本機開發捷徑）直接放行。
@@ -9,7 +10,8 @@ export async function requireSession(): Promise<NextResponse | null> {
   if (process.env.AUTH_DISABLED === "1") {
     return null;
   }
-  const session = await auth();
+  // AUTH_SECRET 沒設好（空值、範本值、太短）：不看任何 session，一律 401。
+  const session = authSecretProblem() !== null ? null : await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "未登入或 session 已過期" }, { status: 401 });
   }

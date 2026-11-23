@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { upsertCliSessions, type CliSessionInput } from "@/lib/db";
+import { tokenUnset } from "@/lib/secret-check";
 
 export const dynamic = "force-dynamic";
 
@@ -19,9 +20,9 @@ const MAX_SESSIONS = 500;
 
 function authorize(request: NextRequest): NextResponse | null {
   const expected = process.env.OTEL_INGEST_TOKEN;
-  if (!expected) {
+  if (tokenUnset(expected) || !expected) {
     return NextResponse.json(
-      { error: "伺服器未設定 OTEL_INGEST_TOKEN，CLI 用量回報停用中" },
+      { error: "伺服器未設定 OTEL_INGEST_TOKEN（空值或仍是範本值），CLI 用量回報停用中" },
       { status: 503 }
     );
   }

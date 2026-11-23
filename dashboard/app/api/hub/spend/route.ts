@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSpendByProject, getFxRate } from "@/lib/db";
 import { monthRange } from "@/lib/format";
 import { taipeiDay } from "@/lib/range";
+import { tokenUnset } from "@/lib/secret-check";
 
 export const dynamic = "force-dynamic";
 
@@ -18,9 +19,9 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   const expected = process.env.HUB_API_TOKEN ?? "";
-  if (!expected) {
+  if (tokenUnset(expected)) {
     return NextResponse.json(
-      { error: "未設定 HUB_API_TOKEN，端點停用" },
+      { error: "未設定 HUB_API_TOKEN（空值或仍是範本值），端點停用" },
       { status: 503 }
     );
   }

@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const script = path.resolve(here, "../../scripts/set-admin-password.sh");
 
-const { getAdminConfig, parseHash, verifyAdminLogin } = await import("../lib/admin-password.ts");
+const { getAdminConfig, parseHash, verifyAdminLogin, inputWithinLimits, ADMIN_USER_PATTERN } = await import("../lib/admin-password.ts");
 const throttle = await import("../lib/login-throttle.ts");
 
 let pass = 0;
@@ -153,5 +153,77 @@ assert.equal(throttle.clientIp(H({ "x-real-ip": "198.51.100.7" })), "198.51.100.
 assert.equal(throttle.clientIp(H({ "x-forwarded-for": "<script>" })), "unknown");
 assert.equal(throttle.clientIp(H({})), "unknown");
 ok("來源 IP 取 X-Forwarded-For 最左邊一個；不像 IP 的內容一律歸 unknown");
+
+// 5. 先佔額度：突發併發也只會進行 5 次驗證（P-05）
+{
+  const cfgC = getAdminConfig({ AUTH_ADMIN_USER: "admin", AUTH_ADMIN_PASSWORD_HASH: h1 });
+  // 與 auth.ts authorize 同樣的順序：先 reserveAttempt（同步），通過才 await 驗證
+  async function attemptNew(ip) {
+    const locked = throttle.reserveAttempt(ip);
+    if (locked > 0) return { verified: false };
+    const okLogin = await verifyAdminLogin(cfgC, "admin", "wrong-password-1");
+    if (!okLogin) throttle.confirmFailure();
+    return { verified: true };
+  }
+  throttle.resetThrottle();
+  const burst = await Promise.all(Array.from({ length: 400 }, () => attemptNew("9.9.9.9")));
+  const verified = burst.filter((r) => r.verified).length;
+  assert.equal(verified, 5, "同一來源 400 個同時到達的請求，鎖定前最多進行 5 次驗證，實際 " + verified);
+  assert.ok(throttle.lockedMinutes("9.9.9.9") > 0, "5 次額度用完後鎖定");
+  assert.equal(throttle.lockedMinutes("9.9.9.10"), 0, "另一個來源不受影響");
+
+  // 對照組：舊寫法（先檢查鎖定、await 驗證、事後才計數）在同樣的突發下會多驗證很多次，證明上面的測試抓得到問題
+  throttle.resetThrottle();
+  async function attemptOld(ip) {
+    if (throttle.lockedMinutes(ip) > 0) return { verified: false };
+    await verifyAdminLogin(cfgC, "admin", "wrong-password-1");
+    throttle.recordFailure(ip);
+    return { verified: true };
+  }
+  const oldBurst = await Promise.all(Array.from({ length: 60 }, () => attemptOld("9.9.9.9")));
+  const oldVerified = oldBurst.filter((r) => r.verified).length;
+  assert.ok(oldVerified > 5, "對照組（舊寫法）應該超過 5 次，實際 " + oldVerified);
+
+  // 成功要退回額度
+  throttle.resetThrottle();
+  for (let i = 0; i < 4; i++) throttle.reserveAttempt("9.9.9.11");
+  throttle.recordSuccess("9.9.9.11");
+  for (let i = 0; i < 4; i++) assert.equal(throttle.reserveAttempt("9.9.9.11"), 0);
+  assert.equal(throttle.lockedMinutes("9.9.9.11"), 0, "成功退回額度後，後續失敗從 0 開始算");
+  ok(`併發：400 個同時請求只進行 5 次驗證（對照組舊寫法 60 個同時請求進行了 ${oldVerified} 次）；成功退回額度`);
+}
+
+// 6. 追蹤清單達上限時，淘汰不得先丟掉鎖定中的項目（P-09）
+{
+  throttle.resetThrottle();
+  const T2 = 2_000_000_000_000;
+  for (let i = 0; i < 5; i++) throttle.reserveAttempt("7.7.7.7", T2 + i);
+  assert.ok(throttle.lockedMinutes("7.7.7.7", T2 + 10) > 0, "7.7.7.7 已鎖定");
+  for (let i = 0; i < throttle.MAX_TRACKED_IPS + 1500; i++) {
+    throttle.reserveAttempt(`10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`, T2 + 1000 + i);
+  }
+  assert.ok(throttle.lockedMinutes("7.7.7.7", T2 + 5000) > 0, "灌滿追蹤清單後，鎖定中的項目仍然在");
+  ok("灌入 6500 個不同來源後，鎖定中的項目沒有被淘汰");
+}
+
+// 7. clientIp 只收合法 IP（P-09）
+for (const bad of ["abc", "..", "1.2.3", "1.2.3.4.5", "999.1.1.1", "1.2.3.4:80", "fe80::1%eth0", "::::", "0x7f.1", " "]) {
+  assert.equal(throttle.clientIp(H({ "x-forwarded-for": bad })), "unknown", "不合法的來源要歸 unknown：" + JSON.stringify(bad));
+}
+assert.equal(throttle.clientIp(H({ "x-forwarded-for": "0:0:0:0:0:0:0:1" })), "::1", "IPv6 不同寫法要正規化成同一個 key");
+assert.equal(throttle.clientIp(H({ "x-forwarded-for": "abc", "x-real-ip": "198.51.100.8" })), "198.51.100.8", "第一個不合法時退回 X-Real-IP");
+ok("clientIp 只收合法 IPv4 與 IPv6，其餘歸 unknown；IPv6 正規化");
+
+// 8. 帳號必須以英數開頭（P-13）、輸入長度檢查（P-08）
+for (const u of ["-rf", "...", "_abc", ".abc", "-abc"]) assert.equal(ADMIN_USER_PATTERN.test(u), false, "不得接受：" + u);
+for (const u of ["admin", "a.b", "a_b-c", "A1b", "0day"]) assert.equal(ADMIN_USER_PATTERN.test(u), true, "應接受：" + u);
+assert.equal(getAdminConfig({ AUTH_ADMIN_USER: "-rf", AUTH_ADMIN_PASSWORD_HASH: h1 }), null, "全符號帳號視為未設定");
+assert.equal(inputWithinLimits("a".repeat(64), "p".repeat(1024)), true);
+assert.equal(inputWithinLimits("a".repeat(65), "p"), false);
+assert.equal(inputWithinLimits("a", "p".repeat(1025)), false);
+assert.equal(inputWithinLimits("a", ""), false);
+assert.equal(inputWithinLimits("a", 5), false);
+assert.equal(inputWithinLimits(undefined, "x"), false);
+ok("帳號要英數開頭；帳號 64、密碼 1024 字元的上限檢查");
 
 console.log(`\n全部通過（${pass} 組）`);

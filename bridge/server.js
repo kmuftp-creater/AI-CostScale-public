@@ -190,7 +190,17 @@ const IMAGE_EDIT_MAX_BYTES = Number(process.env.BRIDGE_IMAGE_MAX_BYTES) || 10_00
 // 改圖的 body 一定超過文字端點那 2 MB 的上限，另外給一個。
 const IMAGE_EDIT_MAX_BODY = Number(process.env.BRIDGE_IMAGE_MAX_BODY) || 48_000_000;
 
-if (!TOKEN) {
+// 範本值（.env.example 的 change-me-bridge-token）是公開的：token 留著它，等於沒有 token。
+// 判斷規則與 dashboard/lib/secret-check.ts 一致：空、placeholder、change-me 或 sk-change-me 開頭。
+const TOKEN_LOWER = TOKEN.trim().toLowerCase();
+const TOKEN_IS_TEMPLATE =
+  TOKEN_LOWER === "placeholder" || TOKEN_LOWER.startsWith("change-me") || TOKEN_LOWER.startsWith("sk-change-me");
+if (TOKEN && TOKEN_IS_TEMPLATE) {
+  console.error("[bridge] BRIDGE_TOKEN 還是範本裡的預設值（change-me 開頭），拒絕啟動。");
+  console.error("[bridge] 請換成自己產生的亂數（例如 openssl rand -hex 24），並與雲端主機 .env 的 BRIDGE_TOKEN 設成同一個值。");
+  process.exit(1);
+}
+if (!TOKEN.trim()) {
   console.error("[bridge] 未設定 BRIDGE_TOKEN，拒絕啟動。");
   console.error("[bridge] 隧道一開就等於對外，沒有 token 等於把訂閱公開給任何人。");
   process.exit(1);

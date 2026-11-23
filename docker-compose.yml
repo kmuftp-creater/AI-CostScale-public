@@ -2,10 +2,19 @@
 # costscale-litellm-1 容器名，資料夾叫什麼都不影響。
 name: costscale
 
+# 每個服務的容器 log 大小上限：單檔 10 MB、最多 5 份（每個服務最多佔約 50 MB）。
+# Docker 預設的 json-file 沒有上限，登入被人狂打、或服務一直報錯時，log 會把磁碟寫滿。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: costscale
       POSTGRES_USER: costscale
@@ -37,6 +46,7 @@ services:
     # 代價要知道：安全更新不會自己來，要自己盯 LiteLLM 的發布。
     image: ghcr.io/berriai/litellm@sha256:468c25f35f3e5ec4e414974f00deab93337b1b4d9953cabcfd3722e59415f834
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       db:
         condition: service_healthy
@@ -68,6 +78,7 @@ services:
   dashboard:
     build: ./dashboard
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       db:
         condition: service_healthy

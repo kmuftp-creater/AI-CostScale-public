@@ -38,7 +38,7 @@
 ### 前置條件
 
 1. 一台 Ubuntu 22.04 或 24.04 的主機，2 GB 記憶體以上，用 root 登入。
-2. 兩個網域，各建一筆 A 紀錄指到這台主機的 IP：一個給儀表板（例如 `cost.example.com`），一個給閘道（例如 `llm.example.com`）。DNS 沒生效時，腳本會停在申請憑證那一步並告訴你怎麼補，其他部分不受影響。網域經過 Cloudflare 代理（橘色雲朵），或主機在 NAT 後面時，解析到的 IP 本來就不是主機的對外 IP，要加 `--skip-dns-check`（見下方「選項」）。
+2. 兩個網域，各建一筆 A 紀錄指到這台主機的 IP：一個給儀表板（例如 `cost.example.com`），一個給閘道（例如 `llm.example.com`）。DNS 沒生效時，腳本會停在申請憑證那一步並告訴你怎麼補，其他部分不受影響。網域經過 Cloudflare 代理（橘色雲朵），或主機在 NAT 後面時，解析到的 IP 本來就不是主機的對外 IP，要加 `--skip-dns-check`（見下方「選項」）。網域前面有 Cloudflare 或其他反向代理時，還要另外設定 nginx，讓它認得真正的來源 IP，否則所有人共用同一個輸錯鎖定，做法見第 6 節的「前面有 Cloudflare 或其他反向代理時」。
 3. 想好一組管理員帳號與密碼（密碼至少 10 個字元）。腳本會問你，不需要任何 Google 設定。想用 Google 登入的話，再另外準備一組 Google OAuth 用戶端（做法見第 4 節，選用）。
 4. 一把 Gemini 免費金鑰，到 <https://aistudio.google.com/apikey> 建立。可以先跳過。
 
@@ -75,7 +75,7 @@ bash /opt/costscale/scripts/install.sh
 | 儀表板網域 | 例如 `cost.example.com`。貼整個網址也可以，腳本會自動去掉前面的 `https://` 與後面的斜線 |
 | 閘道網域 | 例如 `llm.example.com`，要與儀表板不同；兩個填成一樣時會請你重填 |
 | 登入方式 | `1` 帳號密碼（預設，直接按 Enter 就是它，建議）、`2` Google、`3` 兩種都要。**只有 `.env` 裡還沒有任何登入設定時才會問**；已經設好的重跑不會再問、也不會更動 |
-| 管理員帳號 | 選 `1` 或 `3` 才問。只收英數與 `.` `_` `-`，3 到 32 個字元，直接按 Enter 用 `admin` |
+| 管理員帳號 | 選 `1` 或 `3` 才問。要以英數開頭，其餘只收英數與 `.` `_` `-`，3 到 32 個字元，直接按 Enter 用 `admin` |
 | 管理員密碼 | 選 `1` 或 `3` 才問。輸入兩次、畫面不顯示，至少 10 個字元，兩次不一樣會重問。`.env` 裡只存雜湊，不存明碼 |
 | 可登入的 Google 帳號 | 選 `2` 或 `3` 才問。逗號分隔，只有這些帳號能用 Google 登入。只收英數與 `.` `_` `%` `+` `-`，加上 `@` 與網域，逗號前後的空白會自動去掉。帳號密碼登入不看這個清單 |
 | Google OAuth 用戶端 ID 與密鑰 | 選 `2` 或 `3` 才問。第 4 節拿到的兩個值；可以按 Enter 跳過（結尾會提醒「還不能登入」）。**只有填了 ID 才會接著問密鑰**；ID 留空就整組跳過 |
@@ -99,7 +99,19 @@ HTTPS 的做法用 `--tls` 選擇：
 | `--tls skip` | 不動 nginx，HTTPS 由你自己處理 |
 | `--skip-dns-check` | 只對 `--tls letsencrypt` 有用：略過 DNS 比對。網域經過 Cloudflare 代理（橘色雲朵）或主機在 NAT 後面時使用。Let's Encrypt 仍要能從外網連到這台主機的 80 埠，申請不到憑證時仍會停下並說明 |
 
-不想被問問題（例如從自動化腳本執行），加 `--non-interactive`，答案改由環境變數 `CS_DASH_DOMAIN`、`CS_GW_DOMAIN`、`CS_ADMIN_USER`、`CS_ADMIN_PASSWORD`、`CS_ALLOWED_EMAILS`、`CS_GOOGLE_ID`、`CS_GOOGLE_SECRET`、`CS_GEMINI_FREE_KEY`、`CS_LE_EMAIL` 提供。登入方式至少要給一種：有給 `CS_ADMIN_PASSWORD` 就設定帳號密碼登入（帳號用 `CS_ADMIN_USER`，省略時是 `admin`），有給 `CS_GOOGLE_ID` 與 `CS_GOOGLE_SECRET` 就設定 Google 登入。兩種都沒給、`.env` 裡也沒有，腳本會報錯結束，不會裝出一個誰都登不進去的系統。完整說明：
+不想被問問題（例如從自動化腳本執行），加 `--non-interactive`，答案改由環境變數 `CS_DASH_DOMAIN`、`CS_GW_DOMAIN`、`CS_ADMIN_USER`、`CS_ADMIN_PASSWORD`、`CS_ALLOWED_EMAILS`、`CS_GOOGLE_ID`、`CS_GOOGLE_SECRET`、`CS_GEMINI_FREE_KEY`、`CS_LE_EMAIL` 提供。登入方式至少要給一種：有給 `CS_ADMIN_PASSWORD` 就設定帳號密碼登入（帳號用 `CS_ADMIN_USER`，省略時是 `admin`），有給 `CS_GOOGLE_ID` 與 `CS_GOOGLE_SECRET` 就設定 Google 登入。兩種都沒給、`.env` 裡也沒有，腳本會報錯結束，不會裝出一個誰都登不進去的系統。
+
+密碼放在環境變數時要注意兩件事：不要把密碼直接打在命令列前面（會留在 shell 歷史），也不要在裝完之後讓它一直留在環境裡。做法是先用 `read -rs` 把密碼讀進變數（輸入時畫面不顯示，也不進歷史），裝完立刻 `unset`：
+
+```bash
+read -rs CS_ADMIN_PASSWORD && export CS_ADMIN_PASSWORD
+```
+
+```bash
+unset CS_ADMIN_PASSWORD
+```
+
+完整說明：
 
 ```bash
 bash /opt/costscale/scripts/install.sh --help
@@ -119,13 +131,13 @@ bash /opt/costscale/scripts/install.sh --help
 bash /opt/costscale/scripts/set-admin-password.sh
 ```
 
-腳本最後會印出一行 `docker compose` 指令，在 `/opt/costscale` 執行它讓設定生效（`restart` 不會讀到新的 `.env`）：
+腳本最後會印出一行 `docker compose` 指令，在 `/opt/costscale` 執行它讓設定生效（`restart` 不會讀到新的 `.env`）。這一行最後面的 `dashboard` 是服務名稱，代表只重建儀表板：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d
+docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d dashboard
 ```
 
-要補的是 Google 登入的話：照第 4 節建立 OAuth 用戶端，用 `nano /opt/costscale/.env` 把 `AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET` 換成拿到的值，`AUTH_ALLOWED_EMAILS` 改成你的 Google 信箱，再執行上面那一行 `up -d`。
+要補的是 Google 登入的話：照第 4 節建立 OAuth 用戶端，用 `nano /opt/costscale/.env` 把 `AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET` 換成拿到的值，`AUTH_ALLOWED_EMAILS` 改成你的 Google 信箱，再執行上面那一行 `up -d dashboard`。
 
 ### 腳本做了哪些事
 
@@ -288,15 +300,15 @@ chmod 600 .env
 |---|---|
 | `DB_PASSWORD` | 資料庫密碼，產生方式見下方 |
 | `LITELLM_MASTER_KEY` | 閘道主金鑰，`sk-` 開頭加一段亂數 |
-| `AUTH_SECRET` | 登入加密用，產生方式見下方 |
+| `AUTH_SECRET` | 登入加密用，產生方式見下方。**不改的話儀表板會拒絕所有登入**：留著範本值（`change-me` 開頭）、空值、或短於 32 個字元，都視為沒設定，登入頁會顯示怎麼補 |
 | `AUTH_URL` | 儀表板網址，例如 `https://cost.example.com`（結尾不要斜線） |
 | `GATEWAY_PUBLIC_URL` | 閘道網址，例如 `https://llm.example.com` |
 | `AUTH_ADMIN_USER`、`AUTH_ADMIN_PASSWORD_HASH` | 管理員帳號與密碼雜湊。**不要手填**，照本節最後的「管理員帳號密碼」用腳本設定。登入方式至少要有這一種或下面的 Google 登入 |
-| `AUTH_ALLOWED_EMAILS` | 可以用 Google 登入的帳號，逗號分隔。只用帳號密碼登入的話留空（把範本的 `you@example.com` 刪掉） |
+| `AUTH_ALLOWED_EMAILS` | 可以用 Google 登入的帳號，逗號分隔。只用帳號密碼登入的話維持空白（範本預設就是空的）。**有設 SMTP 寄告警信、又沒填 `ALERT_EMAIL_TO` 時，告警信會寄到這個欄位的信箱**，不要留別人的範例信箱 |
 | `AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET` | 選用。第 4 節拿到的兩個值；不用 Google 登入就留空 |
-| `ALERT_CRON_TOKEN` | 排程呼叫儀表板用，亂數 |
-| `OTEL_INGEST_TOKEN` | 用量收集器回報用，亂數 |
-| `BRIDGE_TOKEN` | 閘道呼叫訂閱橋接用，亂數。不裝橋接也填一個 |
+| `ALERT_CRON_TOKEN` | 排程呼叫儀表板用，亂數。留範本值或空值時，用它驗證的 API 一律拒絕請求 |
+| `OTEL_INGEST_TOKEN` | 用量收集器回報用，亂數。同上 |
+| `BRIDGE_TOKEN` | 閘道呼叫訂閱橋接用，亂數。不裝橋接也填一個。橋接服務遇到範本值會拒絕啟動 |
 | 供應商金鑰 | 手上有哪一把就填哪一把，其他保留 `placeholder` |
 
 每一個「亂數」（包括 `AUTH_SECRET`）都用這行產生一個新的，不要共用同一個：
@@ -305,7 +317,9 @@ chmod 600 .env
 openssl rand -hex 24
 ```
 
-`LITELLM_MASTER_KEY` 前面自己補上 `sk-`。
+`LITELLM_MASTER_KEY` 前面自己補上 `sk-`。`AUTH_SECRET` 至少要 32 個字元，這行產生的 48 個字元夠用（要更長可以用 `openssl rand -hex 32`）。
+
+`BOARD_PUSH_TOKEN`、`HUB_API_TOKEN` 是選用的：留空代表停用對應功能；要用就填自己產生的亂數，不要填範本值。
 
 > `AUTH_DISABLED` 必須是 `0`。設成 `1` 會完全跳過登入，任何人都看得到你的花費與金鑰清單。
 
@@ -320,18 +334,38 @@ bash /opt/costscale/scripts/set-admin-password.sh
 腳本會問帳號（Enter 沿用目前的，沒有就是 `admin`）與密碼（輸入兩次、畫面不顯示、至少 10 個字元），只取代 `.env` 裡的 `AUTH_ADMIN_USER` 與 `AUTH_ADMIN_PASSWORD_HASH` 兩行，其他行不動，權限維持 600。最後它會印出一行 `docker compose` 指令，要在 `/opt/costscale` 執行它，新設定才會生效（`restart` 不會讀到新的 `.env`）：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d
+docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d dashboard
 ```
 
-**改密碼**：同一支腳本再跑一次。`up -d` 之後，舊密碼立刻登不進去，用舊密碼登入中的瀏覽器也會被登出。
+最後面的 `dashboard` 是服務名稱，代表**只重建儀表板**。這一點要注意：不帶服務名稱的 `up -d` 會把「設定有變的服務」全部重建，而閘道（`litellm`）是整份讀 `.env` 的，`.env` 任何一行變動它都會被重建，重建期間（約 30 秒）所有接在閘道上的軟體都打不通。改帳號密碼只影響儀表板，所以用上面這一行。
 
-**忘記密碼**：沒有「忘記密碼」的信件流程。你在這台主機上有 root 權限，就在主機上重跑同一支腳本設一個新的，再執行 `up -d`。登入頁本身不能重設密碼，這是刻意的，網路上的人沒有辦法重設。
+帳號規則：要以英數開頭，其餘只收英數與 `.` `_` `-`，3 到 32 個字元（`-rf`、`...` 這類全符號的帳號不收）。
+
+**改密碼**：同一支腳本再跑一次。`up -d dashboard` 之後，舊密碼立刻登不進去，用舊密碼登入中的瀏覽器也會被登出。
+
+**登出只清除這個瀏覽器的登入狀態**。登入憑證有效期限是 7 天，別的裝置上已登入的瀏覽器、或登出之前被人複製走的憑證，在到期之前仍然有效。要讓所有已登入的裝置立刻失效，改密碼即可：換掉密碼並 `up -d dashboard` 之後，舊密碼簽出的所有憑證全部作廢。懷疑憑證外流時，就這樣做。
+
+**忘記密碼**：沒有「忘記密碼」的信件流程。你在這台主機上有 root 權限，就在主機上重跑同一支腳本設一個新的，再執行 `up -d dashboard`。登入頁本身不能重設密碼，這是刻意的，網路上的人沒有辦法重設。
 
 **連續輸錯會鎖多久**：同一個來源 IP 在 15 分鐘內輸錯 5 次，這個 IP 會被鎖 15 分鐘，鎖定期間即使密碼正確也一律拒絕，登入頁會顯示還要等幾分鐘。換別的 IP 不受影響。另外，全站 15 分鐘內輸錯超過 30 次之後，每一次嘗試都會多等 2 秒，用來拖慢換 IP 狂試的人，也不會把你自己整個鎖在外面。帳號錯與密碼錯顯示同一句話。
 
-鎖定的計數放在儀表板程式的記憶體裡，重啟儀表板容器（例如 `up -d` 重建）就歸零。鎖定以 nginx 傳來的 `X-Forwarded-For` 為準，所以第 6 節的 nginx 設定一定要用 `$remote_addr` 覆寫它；自己另外架 Cloudflare 或其他代理的話，要讓最後一層代理覆寫成真正的使用者 IP，否則所有人會被當成同一個 IP。
+鎖定的計數放在儀表板程式的記憶體裡，重啟儀表板容器（例如 `up -d` 重建）就歸零。同一個來源在鎖定前最多只會被驗證 5 次，同時送出很多請求也一樣。鎖定以 nginx 傳來的 `X-Forwarded-For` 為準，所以第 6 節的 nginx 設定一定要用 `$remote_addr` 覆寫它；前面還有 Cloudflare 或其他反向代理的話，要照第 6 節的「前面有 Cloudflare 或其他反向代理時」另外設定，否則所有人會被當成同一個 IP。
 
-不用腳本、純自動化的做法（例如安裝腳本的非互動模式）：用環境變數 `CS_ADMIN_USER`、`CS_ADMIN_PASSWORD` 提供，腳本不會問問題。
+**儀表板的 3300 埠只能綁在 `127.0.0.1`**（本文件的 compose 設定就是這樣）。如果你把它改成對外開放，來源 IP 就可以被任意偽造：輸錯鎖定會失效（換個假 IP 就能繼續猜密碼），別人也能冒用你的 IP 把你鎖在外面。要對外一律走 nginx。
+
+在自動化腳本裡不想被問問題：同一支 `set-admin-password.sh` 可以用環境變數 `CS_ADMIN_USER`、`CS_ADMIN_PASSWORD` 提供，有給密碼就不會問任何問題。**密碼放在環境變數時，不要直接打在命令列前面**（會留在 shell 歷史），先用 `read -rs` 讀進變數，用完立刻 `unset`：
+
+```bash
+read -rs CS_ADMIN_PASSWORD && export CS_ADMIN_PASSWORD
+```
+
+```bash
+bash /opt/costscale/scripts/set-admin-password.sh
+```
+
+```bash
+unset CS_ADMIN_PASSWORD
+```
 
 ---
 
@@ -427,13 +461,50 @@ sudo bash /opt/costscale/deploy/gen-master-key-guard.sh
 sudo cp /opt/costscale/deploy/nginx-snippet-costscale-*.conf /etc/nginx/snippets/
 ```
 
-建立 `/etc/nginx/sites-available/costscale`，內容如下（兩個網域換成你的）：
+建立 `/etc/nginx/sites-available/costscale`，內容如下（兩個網域換成你的）。
+
+檔案最上面的 `map` 與 `limit_req_zone` 兩段**只能寫在 server 區塊之外**（它們屬於 nginx 的 http 層；`sites-enabled` 裡的檔案是被 `nginx.conf` 放進 http 區塊的，所以寫在檔案最上面就是對的位置）。它們替登入相關路徑加上限速：只算 POST（送出登入），每個來源每秒 5 次、突發 10 次，超過回 `429`；看頁面、取 session 這類 GET 不受影響。登入相關路徑（`/login`、`/api/auth/`）的 body 上限壓到 16k，登入內容很小，超過由 nginx 直接回 `413`，不會送進儀表板；其他路徑維持 20m。
 
 ```nginx
+# 登入相關路徑的限速：只算 POST，GET 不受影響
+map $request_method $costscale_login_key {
+    default "";
+    POST    $binary_remote_addr;
+}
+limit_req_zone $costscale_login_key zone=costscale_login:10m rate=5r/s;
+
 # 儀表板
 server {
     listen 80;
     server_name cost.example.com;
+
+    # 登入表單送出（Server Action 會 POST 到 /login）
+    location = /login {
+        limit_req zone=costscale_login burst=10 nodelay;
+        limit_req_status 429;
+        limit_req_log_level warn;
+        client_max_body_size 16k;
+        proxy_pass http://127.0.0.1:3300;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # next-auth 的 API（帳密登入的 callback、登出、csrf、session）
+    location /api/auth/ {
+        limit_req zone=costscale_login burst=10 nodelay;
+        limit_req_status 429;
+        limit_req_log_level warn;
+        client_max_body_size 16k;
+        proxy_pass http://127.0.0.1:3300;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:3300;
@@ -508,6 +579,44 @@ sudo certbot --nginx -d cost.example.com -d llm.example.com
   要回 `404`。回 `401` 或 `200` 代表管理 API 露出去了，回頭檢查 nginx 設定。
 
   用 Windows PowerShell 的話，要把 `curl` 改成 `curl.exe`，並把 `-w '%{http_code}\n'` 改成 `-w "%{http_code}"`。`curl` 在 PowerShell 裡是另一個指令，語法不同。
+
+### 前面有 Cloudflare 或其他反向代理時
+
+網域經過 Cloudflare 代理（橘色雲朵），或儀表板前面還有別的反向代理、負載平衡器時，連到 nginx 的是代理的節點，不是真正的使用者。nginx 看到的 `$remote_addr` 就是代理節點的 IP。
+
+**不設的後果**：登入的輸錯鎖定與限速都是以來源 IP 為單位，所有人會被當成同一個來源。任何人連續輸錯 5 次，同一個節點進來的所有人（包含你自己）都被鎖 15 分鐘，而且可以一直重複；登入路徑的限速也變成全部人共用同一份額度。
+
+**做法**：讓 nginx 只信任代理自己的 IP 範圍，並從代理帶來的標頭取出真正的使用者 IP（nginx 的 `ngx_http_realip_module`，Ubuntu 的 nginx 已內建）。建立 `/etc/nginx/conf.d/costscale-realip.conf`（`conf.d` 裡的檔案屬於 http 層，位置是對的）：
+
+```nginx
+# 只信任代理自己的網段，一個網段一行。下面是「格式範例」，不是 Cloudflare 的網段，不能直接用。
+# Cloudflare 的網段會更新，請到官方頁面取得最新的 IPv4 與 IPv6 兩份清單：https://www.cloudflare.com/ips/
+set_real_ip_from 203.0.113.0/24;
+set_real_ip_from 2001:db8::/32;
+# Cloudflare 會把真正的使用者 IP 放在這個標頭
+real_ip_header CF-Connecting-IP;
+```
+
+說明：
+
+- `set_real_ip_from` 列的是「你信任的代理」，nginx 只有在請求來自這些網段時才採信標頭。**不要寫 `0.0.0.0/0`**，那等於信任所有人，使用者可以自己帶標頭偽造來源 IP，鎖定與限速全部失效。
+- 不是 Cloudflare、而是自己的代理或負載平衡器：把 `set_real_ip_from` 換成它的 IP，`real_ip_header` 換成它帶使用者 IP 的標頭（常見是 `X-Forwarded-For`，用這個標頭時再加一行 `real_ip_recursive on;`）。
+- 設好之後，上面第 6 節的 `proxy_set_header X-Forwarded-For $remote_addr;` 不用改：`$remote_addr` 已經是真正的使用者 IP，儀表板收到的就是它。
+- 建議再到主機的防火牆或雲端的安全群組，把 80 與 443 只開給代理的網段，這樣別人繞過代理直連主機，也騙不了來源 IP。
+
+檢查語法並重新載入：
+
+```bash
+nginx -t
+```
+
+```bash
+systemctl reload nginx
+```
+
+怎麼確認有生效：用手機（不連 Wi-Fi）開登入頁、故意輸錯 5 次被鎖之後，再用別的網路（例如家裡的 Wi-Fi）開登入頁並輸入正確帳密，要能正常登入。不同使用者互不影響，就代表 nginx 認得到真正的來源 IP。
+
+用安裝腳本裝的話，腳本**不會**自動做這件事（它不知道你的代理網段）；加了 `--skip-dns-check` 時，腳本結尾會多印一行提醒指向這一節。
 
 ---
 
@@ -765,9 +874,14 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db psql -
 
 #### 2026-11-23 之後的版本：帳號密碼登入
 
-儀表板多了管理員帳號密碼登入，Google 登入改為選用。**原本用 Google 登入的人不用做任何事**，更新後照常能登入。想加上帳號密碼登入的話，做兩件事：
+儀表板多了管理員帳號密碼登入，Google 登入改為選用。**原本用 Google 登入的人不用做任何事**，更新後照常能登入，有兩點行為改變：
 
-1. 設定帳號密碼（做法見第 3 節最後的「管理員帳號密碼」），再依腳本最後印的那一行 `up -d` 讓它生效。
+- **登入憑證的有效期限從 30 天改成 7 天**（Google 與帳號密碼登入都一樣）。更新後，已登入的瀏覽器最多 7 天就要重新登入一次。
+- **`AUTH_SECRET` 沒設好時，儀表板會拒絕所有登入**：留著範本值（`change-me` 開頭）、空值、或短於 32 個字元都算沒設好。用安裝腳本裝的主機不受影響（腳本一定產生亂數）；手動裝、漏改過這一欄的人，更新後登入頁會顯示「AUTH_SECRET 還沒設好」與補法。這是刻意的：範本值是公開的，用它就能偽造登入。`ALERT_CRON_TOKEN`、`OTEL_INGEST_TOKEN` 等 token 留範本值時，對應的 API 也會改成拒絕請求。
+
+這一版的 `docker-compose.yml` 另外替每個服務加了 log 大小上限（單檔 10 MB、最多 5 份）。更新後第一次 `up -d --build` 會把三個服務各重建一次（閘道約 30 秒不通），之後就不會了。想加上帳號密碼登入的話，做兩件事：
+
+1. 設定帳號密碼（做法見第 3 節最後的「管理員帳號密碼」），再依腳本最後印的那一行 `up -d dashboard` 讓它生效。帳號要以英數開頭，原本帳號是 `.`、`_` 或 `-` 開頭的要改掉。
 2. 把 nginx 設定裡儀表板那一段的 `X-Forwarded-For` 改成覆寫，輸錯鎖定才認得到真正的來源 IP。用安裝腳本裝的主機，重跑一次 `bash /opt/costscale/scripts/install.sh`（帶原本的選項）就會自動改好並備份舊檔；手動裝的，用下面這一行改，再重新載入 nginx：
 
 ```bash
@@ -777,6 +891,8 @@ sed -i 's/proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;/proxy_se
 ```bash
 nginx -t && systemctl reload nginx
 ```
+
+3. 登入路徑的限速與 body 上限（第 6 節 nginx 設定最上面的 `map`、`limit_req_zone`，以及 `/login`、`/api/auth/` 兩段 location）：用安裝腳本裝的主機，重跑一次 `bash /opt/costscale/scripts/install.sh`（帶原本的選項）就會套用並備份舊檔；手動裝的，照第 6 節的內容改 `/etc/nginx/sites-available/costscale`，再執行上面的 `nginx -t && systemctl reload nginx`。
 
 #### 2026-11-22 之後的版本：匯率排程改每小時
 
@@ -871,8 +987,10 @@ cd /opt/costscale && bash scripts/run-fx-fetch.sh
 |---|---|---|
 | 登入頁寫「還沒有設定任何登入方式」 | `.env` 裡帳號密碼與 Google 兩種都沒設定，或帳號格式、雜湊格式不對（儀表板的紀錄會有一行 `[auth]` 警告，不含雜湊內容） | 在主機上執行 `bash /opt/costscale/scripts/set-admin-password.sh`，再照下方「改完 `.env` 怎麼生效」重建儀表板 |
 | 帳號密碼登入顯示「帳號或密碼不正確」 | 帳號或密碼打錯（兩種錯誤顯示同一句，刻意不讓人猜帳號） | 確認大小寫；忘記密碼就在主機上重跑 `scripts/set-admin-password.sh`，再 `up -d` |
-| 登入頁顯示「輸錯次數太多，請等 N 分鐘後再試」 | 同一個 IP 15 分鐘內輸錯 5 次，鎖 15 分鐘，鎖定期間密碼正確也不行 | 等它到期；要馬上解除就重建儀表板容器（在 `up -d` 指令後面加 `--force-recreate dashboard`；鎖定計數放在記憶體，重啟歸零）。所有人都被鎖在同一個 IP 的話，檢查 nginx 的 `X-Forwarded-For` 有沒有照第 6 節覆寫 |
-| 改了密碼，舊密碼還登得進去 | 改完 `.env` 沒有 `up -d`（`restart` 不會讀新值） | 照下方「改完 `.env` 怎麼生效」重建儀表板 |
+| 登入頁寫「登入功能已停用：AUTH_SECRET 還沒設好」 | `.env` 的 `AUTH_SECRET` 是空值、範本預設值（`change-me` 開頭）、或短於 32 個字元，儀表板刻意拒絕所有登入（儀表板的紀錄會有一行 `[auth] 警告`，不含值） | 用 `openssl rand -hex 32` 產生新的，填進 `.env` 的 `AUTH_SECRET`，再執行 `docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d dashboard`（登入頁上有一步一步的說明） |
+| 登入頁顯示「輸錯次數太多，請等 N 分鐘後再試」 | 同一個 IP 15 分鐘內輸錯 5 次，鎖 15 分鐘，鎖定期間密碼正確也不行 | 等它到期；要馬上解除就重建儀表板容器（在 `up -d` 指令後面加 `--force-recreate dashboard`；鎖定計數放在記憶體，重啟歸零）。所有人都被鎖在同一個 IP 的話，檢查 nginx 的 `X-Forwarded-For` 有沒有照第 6 節覆寫；前面有 Cloudflare 或其他反向代理的話，照第 6 節的「前面有 Cloudflare 或其他反向代理時」設定 |
+| 登入時瀏覽器顯示 `429 Too Many Requests` | nginx 對登入路徑的限速：同一個來源每秒超過 5 次 POST（突發可到 10 次） | 等幾秒再試。正常使用不會碰到；一直碰到的話，檢查是不是所有人被當成同一個來源（見上一列） |
+| 改了密碼，舊密碼還登得進去 | 改完 `.env` 沒有 `up -d dashboard`（`restart` 不會讀新值） | 照下方「改完 `.env` 怎麼生效」重建儀表板 |
 | 用 Google 登入後回到登入頁 | 你的帳號不在 `AUTH_ALLOWED_EMAILS`（帳號密碼登入不受這個清單影響） | 加進 `.env` 後，照下方「改完 `.env` 怎麼生效」重建儀表板 |
 | Google 登入顯示 `redirect_uri_mismatch` | OAuth 的重新導向 URI 與 `AUTH_URL` 不一致 | 第 4 節的網址要與 `AUTH_URL` 完全相同 |
 | 專案收到 `401` | 虛擬金鑰錯了或已撤銷 | 到「應用程式」頁重新簽發 |
@@ -891,7 +1009,13 @@ cd /opt/costscale && bash scripts/run-fx-fetch.sh
 docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d
 ```
 
-這一行只會重建設定有變的服務，沒變的不動。跑完重新做第 5 節的「確認」。
+這一行會重建「設定有變的服務」，沒變的不動。**注意閘道（`litellm`）是整份讀 `.env` 的，`.env` 任何一行變動它都會被一起重建**，重建期間（約 30 秒）所有接在閘道上的軟體都打不通。只改了儀表板相關的欄位（帳號密碼、`AUTH_*`）時，在指令最後面加服務名稱，只重建儀表板：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile full up -d dashboard
+```
+
+跑完重新做第 5 節的「確認」。
 
 完整的操作說明在儀表板右上角的「使用說明」。
 
