@@ -1061,4 +1061,7 @@ main() {
   final_summary
 }
 
-main
+# 被 source 載入時（單元測試用）不自動執行
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main
+fi
