@@ -82,6 +82,14 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
             </div>
           ) : (
             <table className="ledger">
+              <thead>
+                <tr>
+                  <th>Feature · 軟體</th>
+                  <th>期間內呼叫次數</th>
+                  <th>期間內 Token</th>
+                  <th style={{ textAlign: "right" }}>期間合計花費</th>
+                </tr>
+              </thead>
               <tbody>
                 {features.rows.map((f) => (
                   <tr key={f.feature} className={f.failures > 0 ? "row-flagged" : undefined}>
@@ -94,10 +102,8 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
                       <small>軟體：{f.apps.join("、")}</small>
                     </td>
                     <td className="t-kind">
-                      {f.calls.toLocaleString("en-US")} 次
-                      <small>
-                        失敗 {f.failures.toLocaleString("en-US")} · 最近 {formatTaipei(f.lastAt, true)}
-                      </small>
+                      {f.calls.toLocaleString("en-US")} 次 · 失敗 {f.failures.toLocaleString("en-US")}
+                      <small>最後一次呼叫在 {formatTaipei(f.lastAt, true)}</small>
                     </td>
                     <td className="t-kind">
                       輸入 {tok(f.promptTokens)}
@@ -105,7 +111,10 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td className="t-amt">
                       {usd(f.spendUsd)}
-                      <small>（約 {nt(f.spendUsd, features.fxRate)}）</small>
+                      <small>
+                        {range.fromDay.slice(5).replace("-", "/")}～{range.toDay.slice(5).replace("-", "/")} 合計（約{" "}
+                        {nt(f.spendUsd, features.fxRate)}）
+                      </small>
                     </td>
                   </tr>
                 ))}
@@ -114,6 +123,8 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
           )}
 
           <div className="panel-foot">
+            次數、Token、花費都是整段期間（{range.fromDay} ～ {range.toDay}）的合計，不是單日；
+            「最後一次呼叫」只是這個 feature 在期間內最晚的一筆請求時間。
             一筆請求帶多個 feature 標籤時，每個 feature 各算一次，所以各列次數與花費相加會大於實際總量。
             沒有 feature 標籤的請求歸在「（未標示 feature）」。依花費由高到低；有失敗請求的列會標色。
             點 feature 名稱會在下方篩出它的逐筆紀錄。
